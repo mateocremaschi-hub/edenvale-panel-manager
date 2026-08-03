@@ -1,4 +1,4 @@
-import { db } from './db';
+import { db, setDataSource } from './db';
 import { buildLocationId, buildStringCode, buildArrayBusCode, buildDcBoxCode, orientationFromModule } from './locationCode';
 import type { PhysicalLocation, Panel, Operator, Issue, Replacement, ActivityEvent } from './types';
 import { newId } from './id';
@@ -153,4 +153,5 @@ export async function seedFictionalDataIfEmpty() {
       await db.activityEvents.bulkAdd(events);
     }
   );
+  await setDataSource('fictional');
 }

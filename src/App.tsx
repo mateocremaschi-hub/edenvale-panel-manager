@@ -10,6 +10,7 @@ import Replacements from '@/pages/Replacements';
 import Records from '@/pages/Records';
 import Sync from '@/pages/Sync';
 import Settings from '@/pages/Settings';
+import Import from '@/pages/Import';
 
 export default function App() {
   return (
@@ -29,6 +30,7 @@ export default function App() {
                 <Route path="/records" element={<Records />} />
                 <Route path="/sync" element={<Sync />} />
                 <Route path="/settings" element={<Settings />} />
+                <Route path="/import" element={<Import />} />
               </Routes>
             </main>
           </div>

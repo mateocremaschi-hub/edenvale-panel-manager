@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
+import { Link } from 'react-router-dom';
 import { db } from '@/lib/db';
 import { useSettings } from '@/store/settings';
 import { newId } from '@/lib/id';
@@ -70,6 +71,19 @@ export default function Settings() {
             Add
           </button>
         </div>
+      </section>
+
+      <section className="rounded-xl border border-border bg-bg-panel p-4">
+        <h2 className="mb-3 text-sm font-semibold text-slate-200">Data import</h2>
+        <p className="mb-3 text-xs text-slate-500">
+          Import or re-import the panels Excel. Protected by the admin PIN above, if one is set.
+        </p>
+        <Link
+          to="/import"
+          className="inline-block rounded-lg bg-accent-teal px-4 py-2 text-sm font-semibold text-bg-panel"
+        >
+          Import Excel
+        </Link>
       </section>
 
       <section className="rounded-xl border border-border bg-bg-panel p-4">

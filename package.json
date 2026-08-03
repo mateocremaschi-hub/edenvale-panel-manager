@@ -20,7 +20,8 @@
     "jspdf": "^2.5.2",
     "jspdf-autotable": "^3.8.3",
     "papaparse": "^5.4.1",
-    "lucide-react": "^0.441.0"
+    "lucide-react": "^0.441.0",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@types/react": "^18.3.5",

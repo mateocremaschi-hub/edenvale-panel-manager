@@ -1,7 +1,7 @@
 # Edenvale Panel Manager
 
-Estado: **Etapa 0 de 8** (scaffolding + modelo de datos + datos ficticios + navegación
-funcional). Todavía no importa el Excel real ni tiene mapa jerárquico ni backend — ver
+Estado: **Etapa 1 de 8** (Etapa 0 -- scaffolding + navegación -- más el importador real de
+Excel). Todavía no tiene mapa jerárquico con geometría real ni backend/sync — ver
 "Próximas etapas" abajo.
 
 ## Qué es esto
@@ -54,6 +54,48 @@ src/
   pages/
     Dashboard.tsx, MapView.tsx, Search.tsx, Reports.tsx, Replacements.tsx, Records.tsx, Sync.tsx, Settings.tsx
 ```
+
+## El importador de Excel (Etapa 1)
+
+Se accede desde **Settings → Data import → Import Excel** (queda detrás del PIN de admin si
+configuraste uno). Pasos del asistente:
+
+1. **Seleccionar archivo** (`.xlsx`) — se lee en un *Web Worker* (hilo aparte) para no
+   trabar la app con archivos grandes como el tuyo (72 MB, 377.888 filas).
+2. **Elegir la hoja** — te lista todas las hojas del archivo (para el tuyo: `COVER (GRS)`,
+   `TITLE PAGE`, `INFORME`, `Replaced`, `Flash tests`). Para los paneles, elegí `INFORME`.
+3. **Elegir la fila de encabezados** — la app hace una primera adivinanza (la fila con más
+   texto), pero podés hacer click en cualquier fila de la vista previa para corregirla. En
+   tu archivo real, los encabezados están en la fila 13, no en la 1.
+4. **Mapear columnas** — cada columna detectada se pre-asigna a un campo interno cuando el
+   nombre coincide con algo conocido (`BLOCK.INV.DCBOX.ARRAY.STRING.MODULE` →
+   ubicación, `SERIAL NUMBER` → serial, `Vmp (V)` → voltage, etc.). Revisalo y corregí lo
+   que haga falta antes de continuar. Sólo ubicación y serial son obligatorios.
+5. **Validar e importar** — corre sobre **todas** las filas (no sólo la vista previa) y
+   detecta: código de ubicación faltante o mal formado, posición fuera de 1-28, serial
+   faltante, **seriales duplicados**, **ubicaciones duplicadas**, **strings con más o
+   menos de 28 paneles válidos**, y voltage con formato inválido (se guarda en blanco, no
+   rechaza la fila completa por eso). Las filas con error NO se importan y se pueden
+   descargar como CSV al final.
+6. **Confirmación de borrado de datos ficticios** — si la app todavía tiene los datos de
+   prueba de la Etapa 0 cargados, te avisa antes de importar (los códigos de ubicación
+   ficticios pisarían ubicaciones reales de los bloques 1 y 2). Los operarios que hayas
+   cargado NO se borran.
+7. **Resultado** — contadores de creados / actualizados / con error / con advertencia, más
+   un caso especial importante: **si el serial del Excel no coincide con el que ya está
+   guardado para esa ubicación, la fila se marca como "serial mismatch" y NO se aplica
+   automáticamente** (se puede descargar esa lista aparte). Esto es a propósito: cambiar
+   el serial de un panel debe pasar por el flujo de **Replacements** para que quede el
+   registro de reemplazo correspondiente — un reimport masivo nunca debe pisar un cambio
+   de serial en silencio.
+8. Reimportar el mismo archivo más adelante es seguro: es un *upsert* — actualiza datos
+   maestros (voltage, lecturas eléctricas, fecha de instalación) pero **nunca** toca el
+   `status` de un panel que ya tiene un issue o reemplazo en curso, y nunca borra
+   `Issues`/`Replacements`/el historial de auditoría.
+
+**Nota de rendimiento:** el parseo completo de un archivo de ~378.000 filas puede tardar
+uno o dos minutos según el dispositivo — hacé la importación desde una computadora, no
+desde el celular en el campo.
 
 ## El modelo de datos, confirmado contra el Excel real
 
@@ -113,8 +155,8 @@ errores de sintaxis reales.
 
 ## Próximas etapas
 
-0. ✅ Scaffolding, modelo de datos, datos ficticios, navegación — **este entregable**.
-1. Importador de Excel real (preview, mapeo, validaciones, upsert).
+0. ✅ Scaffolding, modelo de datos, datos ficticios, navegación.
+1. ✅ Importador de Excel real (preview, mapeo, validaciones, upsert) — **este entregable**.
 2. Mapa jerárquico planta → bloque → panel con geometría real.
 3. Ficha de panel completa + búsqueda avanzada + escaneo QR/barras.
 4. Formulario de reporte completo (fotos, selección múltiple).
@@ -125,13 +167,19 @@ errores de sintaxis reales.
 
 ## Qué se probó en esta entrega
 
-- `npx tsc --noEmit` sobre todo `src/` sin errores de sintaxis (sólo ruido esperado por
-  no tener `node_modules` instalado localmente — no hay red en este entorno para
-  `npm install`, igual que pasó al construir Vegetation Control).
-- Balance de JSON válido en `package.json` / `tsconfig*.json`.
-- Flujo manual leído línea por línea: alta de operario → reporte de issue → reemplazo →
-  cierre de issue relacionado → contadores del Dashboard.
+- `npx tsc --noEmit` sobre todo `src/` (incluido el worker nuevo) sin errores de sintaxis
+  reales — sólo ruido esperado por no tener `node_modules` instalado localmente (sin red
+  en este entorno para `npm install`).
+- Conteo de errores por código: todos caen en categorías esperadas (módulo no encontrado,
+  JSX sin tipos de React, `any` implícito) — ninguno de los códigos de error de sintaxis
+  real (token inesperado, string sin cerrar, etc.).
+- Revisión manual línea por línea del flujo del importador: mapeo de columnas → parseo →
+  validación (duplicados, rango de posición, strings incompletos) → commit por lotes →
+  resumen final.
+- Validé el modelo de columnas contra los datos reales de tu archivo (headers en fila 13,
+  377.888 filas, 36 bloques, 0 códigos sin parsear) directamente con Python/openpyxl antes
+  de escribir el importador.
 
-Falta (antes de considerar esta etapa "verificada" de verdad): correr `npm install && npm
-run dev` en una máquina con red y click-test real en el navegador — no lo pude hacer
-desde acá.
+Falta (antes de considerar esto "verificado" de verdad): correr el importador real con tu
+archivo completo en un navegador de verdad — no lo pude hacer desde acá. Probalo primero
+con un archivo chico o con pocas filas si querés ir con cuidado la primera vez.
