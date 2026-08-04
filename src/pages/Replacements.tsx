@@ -52,6 +52,8 @@ export default function Replacements() {
   const [blockFilter, setBlockFilter] = useState('');
   const [search, setSearch] = useState('');
   const [expandedPhotos, setExpandedPhotos] = useState<string | null>(null);
+  const [serialInput, setSerialInput] = useState('');
+  const [showLocationFallback, setShowLocationFallback] = useState(false);
 
   const blocks = useMemo(() => {
     const set = new Set((replacements ?? []).map((r) => r.locationId.split('.')[0]));
@@ -75,13 +77,18 @@ export default function Replacements() {
     });
   }, [replacements, blockFilter, search]);
 
-  async function loadPanel() {
+  async function loadPanelByLocation() {
     setError(null);
     setWarning(null);
     setCurrent(null);
-    const loc = await db.locations.get(locationId.trim());
+    const typed = locationId.trim();
+    if (!typed) {
+      setError('Type a location code.');
+      return;
+    }
+    const loc = await db.locations.get(typed);
     if (!loc) {
-      setError(`Location "${locationId}" not found.`);
+      setError(`Location "${typed}" not found.`);
       return;
     }
     const panel = await db.panels.get(loc.locationId);
@@ -96,9 +103,14 @@ export default function Replacements() {
     setError(null);
     setWarning(null);
     setCurrent(null);
-    const panel = await db.panels.where('serialNumber').equals(serial).first();
+    const trimmed = serial.trim();
+    if (!trimmed) {
+      setError('Type or scan a serial number.');
+      return;
+    }
+    const panel = await db.panels.where('serialNumber').equals(trimmed).first();
     if (!panel) {
-      setError(`No panel currently installed with serial "${serial}". Try scanning again or type the location manually.`);
+      setError(`No panel currently installed with serial "${trimmed}". Try scanning again, or use "Enter location code instead" below.`);
       return;
     }
     setLocationId(panel.locationId);
@@ -221,6 +233,8 @@ export default function Replacements() {
       setNotes('');
       setWarning(null);
       setPhotos([]);
+      setSerialInput('');
+      setShowLocationFallback(false);
     } finally {
       setSaving(false);
     }
@@ -269,19 +283,42 @@ export default function Replacements() {
                 📷 Scan removed panel barcode
               </button>
               <div className="flex items-center gap-2 text-xs text-slate-500">
-                <div className="h-px flex-1 bg-border" /> or type the location <div className="h-px flex-1 bg-border" />
+                <div className="h-px flex-1 bg-border" /> or <div className="h-px flex-1 bg-border" />
               </div>
               <div className="flex gap-2">
                 <input
-                  value={locationId}
-                  onChange={(e) => setLocationId(e.target.value)}
-                  placeholder="Location code, e.g. 1.1.1.1.1.1"
+                  value={serialInput}
+                  onChange={(e) => setSerialInput(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && lookupBySerial(serialInput)}
+                  placeholder="Type the serial number"
                   className="flex-1 rounded-lg border border-border bg-bg px-3 py-2 text-sm text-slate-100"
                 />
-                <button onClick={loadPanel} className="rounded-lg bg-accent-teal px-4 py-2 text-sm font-semibold text-bg-panel">
-                  Load
+                <button
+                  onClick={() => lookupBySerial(serialInput)}
+                  className="rounded-lg bg-accent-teal px-4 py-2 text-sm font-semibold text-bg-panel"
+                >
+                  Find
                 </button>
               </div>
+              <button
+                onClick={() => setShowLocationFallback((v) => !v)}
+                className="self-start text-xs text-slate-500 underline"
+              >
+                Can't scan or find the serial? Enter the location code instead
+              </button>
+              {showLocationFallback && (
+                <div className="flex gap-2">
+                  <input
+                    value={locationId}
+                    onChange={(e) => setLocationId(e.target.value)}
+                    placeholder="Location code, e.g. 1.1.1.1.1.1"
+                    className="flex-1 rounded-lg border border-border bg-bg px-3 py-2 text-sm text-slate-100"
+                  />
+                  <button onClick={loadPanelByLocation} className="rounded-lg border border-border px-4 py-2 text-sm text-slate-300">
+                    Load
+                  </button>
+                </div>
+              )}
             </div>
           ) : (
             <div className="flex flex-col gap-3">
@@ -377,6 +414,8 @@ export default function Replacements() {
                     setCurrent(null);
                     photos.forEach((p) => URL.revokeObjectURL(p.previewUrl));
                     setPhotos([]);
+                    setSerialInput('');
+                    setShowLocationFallback(false);
                   }}
                   className="rounded-lg border border-border px-4 py-2 text-sm text-slate-300"
                 >

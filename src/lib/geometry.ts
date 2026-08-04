@@ -77,3 +77,46 @@ export function loadBlockGeometry(block: number): Promise<BlockGeometry> {
 export function blockImageUrl(block: number): string {
   return `/geometry/images/${pad2(block)}.png`;
 }
+
+function median(nums: number[]): number {
+  if (nums.length === 0) return 0;
+  const sorted = [...nums].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+}
+
+function clamp(v: number, lo: number, hi: number): number {
+  return Math.max(lo, Math.min(hi, v));
+}
+
+/** Gaps between DISTINCT clusters of values (trackers sharing a column/row have near-identical
+ * cx/cy; naively diffing every sorted point would mix those near-zero gaps in with the real
+ * inter-column/row pitch and badly skew the median). */
+function clusterGaps(vals: number[], tolerance = 10): number[] {
+  const sorted = [...vals].sort((a, b) => a - b);
+  const clusters: number[][] = [];
+  for (const v of sorted) {
+    const last = clusters[clusters.length - 1];
+    if (last && v - last[last.length - 1] < tolerance) last.push(v);
+    else clusters.push([v]);
+  }
+  const centers = clusters.map((c) => c.reduce((a, b) => a + b, 0) / c.length);
+  const gaps: number[] = [];
+  for (let i = 1; i < centers.length; i++) gaps.push(centers[i] - centers[i - 1]);
+  return gaps;
+}
+
+/** Reasonable tracker box size for the schematic view: a fraction of the median gap between
+ * neighbouring tracker columns/rows, so boxes fill the space without overlapping. Approximate --
+ * we don't have the exact drawn tracker footprint, just its center point. Clamped to a safe
+ * range so irregular (rotated/diagonal) blocks never get invisible or overlapping boxes. */
+export function computeTrackerBoxSize(geometry: BlockGeometry): { w: number; h: number } {
+  const trackers = Object.values(geometry.trackers);
+  const gx = median(clusterGaps(trackers.map((t) => t.cx))) || geometry.w / 20;
+  const gy = median(clusterGaps(trackers.map((t) => t.cy))) || geometry.h / 20;
+  const minDim = Math.min(geometry.w, geometry.h);
+  return {
+    w: clamp(gx * 0.82, minDim / 150, minDim / 6),
+    h: clamp(gy * 0.82, minDim / 150, minDim / 6),
+  };
+}
