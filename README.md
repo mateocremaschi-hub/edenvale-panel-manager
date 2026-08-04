@@ -182,4 +182,4 @@ errores de sintaxis reales.
 
 Falta (antes de considerar esto "verificado" de verdad): correr el importador real con tu
 archivo completo en un navegador de verdad — no lo pude hacer desde acá. Probalo primero
-con un archivo chico o con pocas filas si querés ir con cuidado la primera vez.
+con un archivo chico o con pocas filas si querés ir con cuidado la primera vez. 
