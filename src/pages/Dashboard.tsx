@@ -30,6 +30,8 @@ export default function Dashboard() {
   );
   const noSunManager = useLiveQuery(() => db.issues.filter((i) => !i.sunManagerId).count(), [], 0);
   const replacements = useLiveQuery(() => db.replacements.toArray(), [], []);
+  const dataSourceEntry = useLiveQuery(() => db.meta.get('dataSource'), [], undefined);
+  const dataSource = dataSourceEntry?.value ?? 'empty';
 
   const weekStart = startOf('week').getTime();
   const monthStart = startOf('month').getTime();
@@ -59,7 +61,11 @@ export default function Dashboard() {
         ))}
       </div>
       <p className="mt-6 text-sm text-slate-500">
-        Running on fictional test data (Etapa 0). The real Excel importer ships in Etapa 1.
+        {dataSource === 'fictional' &&
+          'Running on fictional test data (Etapa 0) -- import the real Excel from Settings → Data import.'}
+        {dataSource === 'empty' &&
+          totalPanels === 0 &&
+          'No data loaded on this device/URL yet. Fictional test data will seed automatically, or import the real Excel from Settings.'}
       </p>
     </div>
   );
