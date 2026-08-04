@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '@/lib/db';
 import { useSession } from '@/store/session';
@@ -54,6 +55,28 @@ export default function Replacements() {
   const [expandedPhotos, setExpandedPhotos] = useState<string | null>(null);
   const [serialInput, setSerialInput] = useState('');
   const [showLocationFallback, setShowLocationFallback] = useState(false);
+
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    const panelId = searchParams.get('panelId');
+    if (!panelId) return;
+    db.panels.get(panelId).then((panel) => {
+      if (panel) {
+        setLocationId(panel.locationId);
+        setCurrent({ locationId: panel.locationId, serial: panel.serialNumber, voltage: panel.voltage, panelId: panel.panelId });
+        setOpen(true);
+      } else {
+        setError(`Panel "${panelId}" not found (it may have been removed from the last import).`);
+      }
+    });
+    // Clear the param so a later manual "New replacement" doesn't reopen this one.
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.delete('panelId');
+      return next;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const blocks = useMemo(() => {
     const set = new Set((replacements ?? []).map((r) => r.locationId.split('.')[0]));

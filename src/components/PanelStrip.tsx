@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import type { Panel } from '@/lib/types';
 
 interface Props {
@@ -26,6 +27,7 @@ function panelStatusColor(status: Panel['status']): string {
 /** Norte->Sur schematic strip of a string's 28 panels, tappable one by one. Position order
  * comes straight from the imported Excel (locationId's module number), not from any drawing. */
 export default function PanelStrip({ title, panels }: Props) {
+  const navigate = useNavigate();
   const [active, setActive] = useState<Panel | null>(panels[0] ?? null);
 
   useEffect(() => {
@@ -34,6 +36,11 @@ export default function PanelStrip({ title, panels }: Props) {
 
   function copy(text: string) {
     navigator.clipboard?.writeText(text).catch(() => {});
+  }
+
+  function replaceThisPanel() {
+    if (!active) return;
+    navigate(`/replacements?panelId=${encodeURIComponent(active.panelId)}`);
   }
 
   if (panels.length === 0) {
@@ -66,12 +73,20 @@ export default function PanelStrip({ title, panels }: Props) {
         <span className="text-xs font-semibold text-slate-400">S</span>
       </div>
       {active && (
-        <div className="flex items-center justify-between rounded-lg border border-border px-3 py-2 text-xs">
-          <span className="text-slate-400">Pos {active.locationId.split('.').pop()}</span>
-          <span className="font-mono text-slate-200">{active.serialNumber}</span>
-          <span className="text-slate-400">{active.status}</span>
-          <button onClick={() => copy(active.serialNumber)} className="text-accent-blue">
-            Copy
+        <div className="flex flex-col gap-2 rounded-lg border border-border px-3 py-2 text-xs">
+          <div className="flex items-center justify-between">
+            <span className="text-slate-400">Pos {active.locationId.split('.').pop()}</span>
+            <span className="font-mono text-slate-200">{active.serialNumber}</span>
+            <span className="text-slate-400">{active.status}</span>
+            <button onClick={() => copy(active.serialNumber)} className="text-accent-blue">
+              Copy
+            </button>
+          </div>
+          <button
+            onClick={replaceThisPanel}
+            className="rounded-lg bg-accent-blue px-3 py-2 text-xs font-semibold text-white active:opacity-80"
+          >
+            🔧 Replace this panel
           </button>
         </div>
       )}
