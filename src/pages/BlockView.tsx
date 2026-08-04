@@ -28,6 +28,23 @@ function statusColor(agg: StringAgg | undefined): string {
   return LEGEND[0].color;
 }
 
+function panelStatusColor(status: Panel['status']): string {
+  switch (status) {
+    case 'pending_replacement':
+      return 'rgba(217,83,79,0.9)';
+    case 'issue_reported':
+    case 'under_assessment':
+    case 'monitoring':
+      return 'rgba(224,138,60,0.9)';
+    case 'replaced':
+      return 'rgba(92,184,92,0.9)';
+    case 'closed':
+      return 'rgba(91,114,144,0.45)';
+    default:
+      return 'rgba(91,114,144,0.85)';
+  }
+}
+
 export default function BlockView() {
   const { blockNum } = useParams<{ blockNum: string }>();
   const navigate = useNavigate();
@@ -38,6 +55,7 @@ export default function BlockView() {
   const [statusByString, setStatusByString] = useState<Map<string, StringAgg>>(new Map());
   const [selectedString, setSelectedString] = useState<GeometryString | null>(null);
   const [selectedPanels, setSelectedPanels] = useState<Panel[]>([]);
+  const [activePanel, setActivePanel] = useState<Panel | null>(null);
 
   useEffect(() => {
     if (!Number.isFinite(block)) return;
@@ -86,11 +104,11 @@ export default function BlockView() {
     const locs = await db.locations.where('block').equals(block).toArray();
     const ids = locs.filter((l) => l.locationId.startsWith(prefix)).map((l) => l.locationId);
     const panels = await db.panels.bulkGet(ids);
-    setSelectedPanels(
-      panels
-        .filter((p): p is Panel => !!p)
-        .sort((a, b) => Number(a.locationId.split('.').pop()) - Number(b.locationId.split('.').pop()))
-    );
+    const sorted = panels
+      .filter((p): p is Panel => !!p)
+      .sort((a, b) => Number(a.locationId.split('.').pop()) - Number(b.locationId.split('.').pop()));
+    setSelectedPanels(sorted);
+    setActivePanel(sorted[0] ?? null);
   }
 
   function copy(text: string) {
@@ -171,21 +189,43 @@ export default function BlockView() {
               {selectedPanels.length === 0 ? (
                 <p className="text-sm text-slate-500">No imported panels found at this location yet.</p>
               ) : (
-                <div className="flex flex-col gap-1">
-                  {selectedPanels.map((p) => (
-                    <div
-                      key={p.panelId}
-                      className="flex items-center justify-between rounded-lg border border-border px-3 py-1.5 text-xs"
-                    >
-                      <span className="text-slate-400">#{p.locationId.split('.').pop()}</span>
-                      <span className="font-mono text-slate-200">{p.serialNumber}</span>
-                      <span className="text-slate-400">{p.status}</span>
-                      <button onClick={() => copy(p.locationId)} className="text-accent-blue">
+                <>
+                  <div className="mb-2 flex items-center gap-2">
+                    <span className="text-xs font-semibold text-slate-400">N</span>
+                    <div className="flex flex-1 gap-0.5">
+                      {selectedPanels.map((p) => {
+                        const pos = p.locationId.split('.').pop();
+                        const isActive = activePanel?.panelId === p.panelId;
+                        return (
+                          <button
+                            key={p.panelId}
+                            onClick={() => setActivePanel(p)}
+                            title={`#${pos} · ${p.serialNumber}`}
+                            className="h-7 flex-1 rounded-[2px]"
+                            style={{
+                              backgroundColor: panelStatusColor(p.status),
+                              outline: isActive ? '2px solid #4A90D9' : '1px solid rgba(255,255,255,0.2)',
+                            }}
+                          />
+                        );
+                      })}
+                    </div>
+                    <span className="text-xs font-semibold text-slate-400">S</span>
+                  </div>
+                  <p className="mb-2 text-[11px] text-slate-600">
+                    Position 1 (North) → 28 (South), order from your imported Excel.
+                  </p>
+                  {activePanel && (
+                    <div className="flex items-center justify-between rounded-lg border border-border px-3 py-2 text-xs">
+                      <span className="text-slate-400">Position {activePanel.locationId.split('.').pop()}</span>
+                      <span className="font-mono text-slate-200">{activePanel.serialNumber}</span>
+                      <span className="text-slate-400">{activePanel.status}</span>
+                      <button onClick={() => copy(activePanel.locationId)} className="text-accent-blue">
                         Copy
                       </button>
                     </div>
-                  ))}
-                </div>
+                  )}
+                </>
               )}
             </div>
           )}
