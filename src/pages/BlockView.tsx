@@ -4,6 +4,7 @@ import { db } from '@/lib/db';
 import { loadBlockGeometry, blockImageUrl, type BlockGeometry, type GeometryString } from '@/lib/geometry';
 import { parseStringCode } from '@/lib/locationCode';
 import type { Panel } from '@/lib/types';
+import ZoomPan from '@/components/ZoomPan';
 
 interface StringAgg {
   total: number;
@@ -12,12 +13,19 @@ interface StringAgg {
   replaced: number;
 }
 
+const LEGEND: { label: string; color: string }[] = [
+  { label: 'Normal', color: 'rgba(91,114,144,0.55)' },
+  { label: 'Issue reported', color: 'rgba(224,138,60,0.75)' },
+  { label: 'Pending replacement', color: 'rgba(217,83,79,0.75)' },
+  { label: 'Replaced', color: 'rgba(92,184,92,0.7)' },
+];
+
 function statusColor(agg: StringAgg | undefined): string {
-  if (!agg || agg.total === 0) return 'rgba(91,114,144,0.25)';
-  if (agg.pending > 0) return 'rgba(217,83,79,0.6)';
-  if (agg.issue > 0) return 'rgba(224,138,60,0.6)';
-  if (agg.replaced === agg.total) return 'rgba(92,184,92,0.5)';
-  return 'rgba(91,114,144,0.2)';
+  if (!agg || agg.total === 0) return LEGEND[0].color;
+  if (agg.pending > 0) return LEGEND[2].color;
+  if (agg.issue > 0) return LEGEND[1].color;
+  if (agg.replaced === agg.total) return LEGEND[3].color;
+  return LEGEND[0].color;
 }
 
 export default function BlockView() {
@@ -110,15 +118,20 @@ export default function BlockView() {
 
       {geometry && (
         <>
-          <p className="mb-3 text-xs text-slate-500">
+          <p className="mb-2 text-xs text-slate-500">
             {geometry.strings.length} strings · {Object.keys(geometry.trackers).length} trackers ·{' '}
-            {geometry.dcbox.length} DC boxes. Tap a string to see its panels.
+            {geometry.dcbox.length} DC boxes. Pinch or scroll to zoom, drag to pan, tap a string.
           </p>
-          <div
-            className="relative w-full overflow-hidden rounded-lg border border-border bg-white"
-            style={{ aspectRatio: `${geometry.w} / ${geometry.h}` }}
-          >
-            <img src={blockImageUrl(block)} alt={`Block ${block} plan`} className="absolute inset-0 h-full w-full" />
+          <div className="mb-3 flex flex-wrap gap-3">
+            {LEGEND.map((l) => (
+              <span key={l.label} className="flex items-center gap-1.5 text-xs text-slate-400">
+                <span className="h-3 w-3 rounded-sm border border-white/40" style={{ backgroundColor: l.color }} />
+                {l.label}
+              </span>
+            ))}
+          </div>
+          <ZoomPan aspectRatio={geometry.w / geometry.h}>
+            <img src={blockImageUrl(block)} alt={`Block ${block} plan`} className="absolute inset-0 h-full w-full" draggable={false} />
             {geometry.strings.map((s) => {
               const agg = statusByString.get(s.n);
               const left = ((s.x - s.w / 2) / geometry.w) * 100;
@@ -131,21 +144,23 @@ export default function BlockView() {
                   key={s.n}
                   onClick={() => openString(s)}
                   title={s.n}
-                  className="absolute"
+                  className="absolute rounded-[1px] transition-[outline-width]"
                   style={{
                     left: `${left}%`,
                     top: `${top}%`,
                     width: `${width}%`,
                     height: `${height}%`,
                     backgroundColor: statusColor(agg),
-                    outline: isSelected ? '2px solid #4A90D9' : 'none',
+                    border: isSelected ? '2px solid #4A90D9' : '1px solid rgba(255,255,255,0.55)',
                   }}
                 />
               );
             })}
-          </div>
+          </ZoomPan>
+        </>
+      )}
 
-          {selectedString && (
+      {selectedString && (
             <div className="mt-4 rounded-xl border border-border bg-bg-panel p-4">
               <div className="mb-2 flex items-center justify-between">
                 <span className="font-mono text-sm text-slate-100">{selectedString.n}</span>
@@ -174,8 +189,6 @@ export default function BlockView() {
               )}
             </div>
           )}
-        </>
-      )}
     </div>
   );
 }
