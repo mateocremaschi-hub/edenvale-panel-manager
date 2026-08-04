@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { Link } from 'react-router-dom';
-import { db } from '@/lib/db';
+import { db, clearPanelData, setDataSource } from '@/lib/db';
 import { useSettings } from '@/store/settings';
 import { newId } from '@/lib/id';
 
@@ -24,6 +24,23 @@ export default function Settings() {
 
   async function toggleOperator(id: string, active: boolean) {
     await db.operators.update(id, { active: !active });
+  }
+
+  async function resetAllPanelData() {
+    if (adminPin) {
+      const entered = prompt('Enter admin PIN to reset all panel data:');
+      if (entered !== adminPin) {
+        alert('Incorrect PIN.');
+        return;
+      }
+    }
+    const confirmed = confirm(
+      'This deletes ALL panels, locations, issues, replacements and activity history on THIS device/URL. Operators are kept. This cannot be undone. Continue?'
+    );
+    if (!confirmed) return;
+    await clearPanelData();
+    await setDataSource('empty');
+    alert('Local panel data cleared. Fictional test data will reload next time the app starts, or go straight to Data import.');
   }
 
   return (
@@ -127,6 +144,18 @@ export default function Settings() {
             Save
           </button>
         </div>
+      </section>
+
+      <section className="rounded-xl border border-status-pending/40 bg-bg-panel p-4">
+        <h2 className="mb-3 text-sm font-semibold text-status-pending">Danger zone</h2>
+        <p className="mb-3 text-xs text-slate-500">
+          Wipes all panels/locations/issues/replacements/history on this device/URL only (nothing on any
+          other device is touched). Use this if an import ran on top of leftover test data by mistake.
+          Operators are kept.
+        </p>
+        <button onClick={resetAllPanelData} className="rounded-lg border border-status-pending px-4 py-2 text-sm font-semibold text-status-pending">
+          Reset all panel data
+        </button>
       </section>
 
       <footer className="pt-2 text-center text-xs text-slate-600">Developed by Mateo Cremaschi</footer>

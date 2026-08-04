@@ -4,7 +4,7 @@ import { ExcelImportSession } from '@/lib/importRunner';
 import { autoDetectMapping } from '@/lib/excelFields';
 import { IMPORT_FIELDS, REQUIRED_IMPORT_FIELDS, type ColumnMapping, type ImportRow, type ImportSummary } from '@/lib/importTypes';
 import { commitBatch, loadExistingPanelIndex, logImportEvent, newCommitStats, type CommitStats } from '@/lib/importCommit';
-import { getDataSource, clearPanelData, setDataSource } from '@/lib/db';
+import { db, clearPanelData, setDataSource } from '@/lib/db';
 import { useSession } from '@/store/session';
 import { useSettings } from '@/store/settings';
 
@@ -121,6 +121,8 @@ export default function Import() {
     setStep('mapping');
   }
 
+  const [existingCount, setExistingCount] = useState(0);
+
   async function startImport() {
     const missing = REQUIRED_IMPORT_FIELDS.filter((f) => !Object.values(mapping).includes(f));
     if (missing.length > 0) {
@@ -128,8 +130,9 @@ export default function Import() {
       return;
     }
     setError(null);
-    const source = await getDataSource();
-    if (source === 'fictional') {
+    const count = await db.panels.count();
+    if (count > 0) {
+      setExistingCount(count);
       setStep('confirmClear');
     } else {
       runImportNow();
@@ -304,18 +307,25 @@ export default function Import() {
       {step === 'confirmClear' && (
         <div className="rounded-xl border border-border bg-bg-panel p-4">
           <p className="mb-3 text-sm text-status-observation">
-            This device still has the Etapa 0 fictional test data loaded (its location codes overlap real
-            block/string numbers). It needs to be cleared before importing the real farm data -- operators
-            are kept.
+            This device/URL already has {existingCount.toLocaleString()} panel(s) stored locally (could be
+            the Etapa 0 fictional test data, a previous real import, or a mix of both). Choose how to
+            proceed:
           </p>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <button onClick={clearThenImport} className="rounded-lg bg-accent-blue px-4 py-2 text-sm font-semibold text-white">
-              Clear test data &amp; import
+              Clear everything &amp; import fresh
+            </button>
+            <button onClick={() => runImportNow()} className="rounded-lg border border-border px-4 py-2 text-sm text-slate-300">
+              Keep existing data (upsert on top)
             </button>
             <button onClick={() => setStep('mapping')} className="rounded-lg border border-border px-4 py-2 text-sm text-slate-300">
               Cancel
             </button>
           </div>
+          <p className="mt-2 text-xs text-slate-500">
+            Not sure? If you're not 100% certain the existing data is a clean previous real import, clear
+            it first — Settings → Danger zone also has a manual reset for later.
+          </p>
         </div>
       )}
 
