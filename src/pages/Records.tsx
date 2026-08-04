@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '@/lib/db';
+import { compareLocationIds } from '@/lib/locationCode';
 import type { PanelStatus } from '@/lib/types';
 
 const TABS: { key: PanelStatus | 'all'; label: string }[] = [
@@ -23,12 +24,14 @@ export default function Records() {
   }, [panels]);
 
   const filtered = useMemo(() => {
-    return (panels ?? []).filter((p) => {
-      if (tab !== 'all' && p.status !== tab) return false;
-      if (blockFilter && p.locationId.split('.')[0] !== blockFilter) return false;
-      if (q && !p.serialNumber.includes(q) && !p.locationId.includes(q)) return false;
-      return true;
-    });
+    return (panels ?? [])
+      .filter((p) => {
+        if (tab !== 'all' && p.status !== tab) return false;
+        if (blockFilter && p.locationId.split('.')[0] !== blockFilter) return false;
+        if (q && !p.serialNumber.includes(q) && !p.locationId.includes(q)) return false;
+        return true;
+      })
+      .sort((a, b) => compareLocationIds(a.locationId, b.locationId));
   }, [panels, tab, blockFilter, q]);
 
   function exportCsv() {

@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { db } from '@/lib/db';
+import { compareLocationIds } from '@/lib/locationCode';
 import type { Panel } from '@/lib/types';
 import { t } from '@/i18n';
 
@@ -40,7 +41,7 @@ export default function SearchPage() {
           oldSerialMatches.has(p.locationId) ||
           sunManagerMatches.has(p.locationId)
       );
-      setResults(filtered.slice(0, 50));
+      setResults(filtered.sort((a, b) => compareLocationIds(a.locationId, b.locationId)).slice(0, 50));
     } finally {
       setLoading(false);
     }

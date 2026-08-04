@@ -44,3 +44,21 @@ export function orientationFromModule(module: number): 'N' | 'S' | 'unknown' {
   if (module >= 15 && module <= 28) return 'S';
   return 'unknown';
 }
+
+/**
+ * Sort key for a location code that orders NUMERICALLY per field (block, inverter,
+ * dcBox, arrayBus, string, module) instead of alphabetically. Plain string sort would
+ * put "9.1.1.1.1.10" before "9.1.1.1.1.2" (comparing "1" < "2" character by character) --
+ * zero-padding each field first avoids that. Falls back to the raw string for anything
+ * that doesn't parse, so it still sorts (just not numerically) instead of crashing.
+ */
+export function locationSortKey(locationId: string): string {
+  const p = parseLocationCode(locationId);
+  if (!p) return locationId;
+  const pad = (n: number) => String(n).padStart(4, '0');
+  return [p.block, p.inverter, p.dcBox, p.arrayBus, p.string, p.module].map(pad).join('.');
+}
+
+export function compareLocationIds(a: string, b: string): number {
+  return locationSortKey(a).localeCompare(locationSortKey(b));
+}
