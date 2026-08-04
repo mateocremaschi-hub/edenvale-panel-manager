@@ -4,6 +4,8 @@ import { Link } from 'react-router-dom';
 import { db, clearPanelData, setDataSource } from '@/lib/db';
 import { useSettings } from '@/store/settings';
 import { newId } from '@/lib/id';
+import { hasSupabase } from '@/lib/supabase';
+import { pushLocationsAndPanels, type SyncProgress } from '@/lib/sync';
 
 export default function Settings() {
   const operators = useLiveQuery(() => db.operators.toArray(), [], []);
@@ -14,6 +16,26 @@ export default function Settings() {
   const [pin, setPin] = useState('');
   const [vMin, setVMin] = useState(String(voltageMin));
   const [vMax, setVMax] = useState(String(voltageMax));
+  const [pushProgress, setPushProgress] = useState<SyncProgress | null>(null);
+  const [pushError, setPushError] = useState<string | null>(null);
+  const [pushDone, setPushDone] = useState(false);
+
+  async function handlePush() {
+    setPushError(null);
+    setPushDone(false);
+    const confirmed = confirm(
+      "This uploads every location and panel on THIS device to the shared Supabase project, so every other device can see the same real data. Only run this from the device that has the real imported Excel data. It can take a couple of minutes. Continue?"
+    );
+    if (!confirmed) return;
+    try {
+      await pushLocationsAndPanels(setPushProgress);
+      setPushDone(true);
+    } catch (err) {
+      setPushError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setPushProgress(null);
+    }
+  }
 
   async function addOperator() {
     const trimmed = newOperator.trim();
@@ -144,6 +166,43 @@ export default function Settings() {
             Save
           </button>
         </div>
+      </section>
+
+      <section className="rounded-xl border border-border bg-bg-panel p-4">
+        <h2 className="mb-3 text-sm font-semibold text-slate-200">Supabase sync</h2>
+        {!hasSupabase() ? (
+          <p className="text-xs text-slate-500">
+            Not configured yet on this build. Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY as environment
+            variables in Netlify, then redeploy.
+          </p>
+        ) : (
+          <>
+            <p className="mb-3 text-xs text-slate-500">
+              Uploads this device's locations + panels to the shared server, so any other device (like your
+              phone) can download the real data automatically instead of importing the Excel again. Only
+              needed once from the device with the real data -- safe to run again later if you re-import.
+            </p>
+            {pushError && <div className="mb-3 rounded-lg bg-status-pending/20 p-2 text-xs text-status-pending">{pushError}</div>}
+            {pushDone && <div className="mb-3 rounded-lg bg-status-replaced/20 p-2 text-xs text-status-replaced">Upload complete.</div>}
+            {pushProgress ? (
+              <div>
+                <p className="mb-1 text-xs text-slate-400">
+                  {pushProgress.phase}... {pushProgress.done.toLocaleString()} / {pushProgress.total.toLocaleString()}
+                </p>
+                <div className="h-2 w-full overflow-hidden rounded-full bg-bg">
+                  <div
+                    className="h-full bg-accent-blue transition-all"
+                    style={{ width: `${pushProgress.total ? (pushProgress.done / pushProgress.total) * 100 : 0}%` }}
+                  />
+                </div>
+              </div>
+            ) : (
+              <button onClick={handlePush} className="rounded-lg bg-accent-blue px-4 py-2 text-sm font-semibold text-white">
+                Push local data to Supabase
+              </button>
+            )}
+          </>
+        )}
       </section>
 
       <section className="rounded-xl border border-status-pending/40 bg-bg-panel p-4">
