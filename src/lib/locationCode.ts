@@ -3,6 +3,32 @@ import type { LocationCodeParts } from './types';
 // Matches "S-1.2.15.2.4.7" or "1.2.15.2.4.7" (the "S-" prefix used in the Excel's
 // "BLOCK.INV.DCBOX.ARRAY.STRING.MODULE" column is optional here).
 const CODE_RE = /^S?-?(\d+)\.(\d+)\.(\d+)\.(\d+)\.(\d+)\.(\d+)$/i;
+// String-level code (5 fields, no module) as found in the block plan geometry (all_blocks.json).
+const STRING_CODE_RE = /^S?-?(\d+)\.(\d+)\.(\d+)\.(\d+)\.(\d+)$/i;
+
+export interface StringCodeParts {
+  block: number;
+  inverter: number;
+  dcBox: number;
+  arrayBus: number;
+  string: number;
+}
+
+export function parseStringCode(raw: string): StringCodeParts | null {
+  const m = STRING_CODE_RE.exec(raw.trim());
+  if (!m) return null;
+  return {
+    block: Number(m[1]),
+    inverter: Number(m[2]),
+    dcBox: Number(m[3]),
+    arrayBus: Number(m[4]),
+    string: Number(m[5]),
+  };
+}
+
+export function buildStringCodeFromParts(p: StringCodeParts): string {
+  return `S-${p.block}.${p.inverter}.${p.dcBox}.${p.arrayBus}.${p.string}`;
+}
 
 export function parseLocationCode(raw: string): LocationCodeParts | null {
   const m = CODE_RE.exec(raw.trim());

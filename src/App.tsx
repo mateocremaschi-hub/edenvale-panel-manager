@@ -11,6 +11,7 @@ import Records from '@/pages/Records';
 import Sync from '@/pages/Sync';
 import Settings from '@/pages/Settings';
 import Import from '@/pages/Import';
+import BlockView from '@/pages/BlockView';
 
 export default function App() {
   return (
@@ -24,6 +25,7 @@ export default function App() {
               <Routes>
                 <Route path="/" element={<Dashboard />} />
                 <Route path="/map" element={<MapView />} />
+                <Route path="/map/block/:blockNum" element={<BlockView />} />
                 <Route path="/search" element={<SearchPage />} />
                 <Route path="/reports" element={<Reports />} />
                 <Route path="/replacements" element={<Replacements />} />

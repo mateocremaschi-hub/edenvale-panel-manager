@@ -1,8 +1,8 @@
 # Edenvale Panel Manager
 
-Estado: **Etapa 1 de 8** (Etapa 0 -- scaffolding + navegación -- más el importador real de
-Excel). Todavía no tiene mapa jerárquico con geometría real ni backend/sync — ver
-"Próximas etapas" abajo.
+Estado: **Etapa 2 en curso** (Etapas 0 y 1 completas). Mapa con la geometría real de los 36
+bloques (extraída de los planos CAD reales) ya funciona: Map → elegí un bloque → "View real
+plan" → plano real con los strings clickeables coloreados por estado.
 
 ## Qué es esto
 

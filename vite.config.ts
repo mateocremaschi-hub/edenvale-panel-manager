@@ -29,7 +29,7 @@ export default defineConfig({
       workbox: {
         // App shell + data are cached at runtime via Dexie/IndexedDB (see src/lib/db.ts).
         // Here we only need the static build assets available offline.
-        globPatterns: ['**/*.{js,css,html,svg,png,ico,webmanifest}'],
+        globPatterns: ['**/*.{js,css,html,svg,png,ico,webmanifest,json}'],
         maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
       },
     }),

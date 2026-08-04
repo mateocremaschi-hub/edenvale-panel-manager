@@ -1,8 +1,10 @@
 import { useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '@/lib/db';
 
 export default function MapView() {
+  const navigate = useNavigate();
   const locations = useLiveQuery(() => db.locations.toArray(), [], []);
   const panels = useLiveQuery(() => db.panels.toArray(), [], []);
   const [selectedBlock, setSelectedBlock] = useState<number | null>(null);
@@ -40,9 +42,8 @@ export default function MapView() {
     <div>
       <h1 className="mb-1 text-lg font-semibold text-slate-100">Map</h1>
       <p className="mb-4 text-sm text-slate-500">
-        Farm overview only (Etapa 0). The hierarchical block → tracker → panel map with real vector
-        geometry (reusing the Vegetation Control layout_geojson approach) lands in Etapa 2, once the
-        layout files are attached.
+        Farm overview. Select a block, then "View real plan" for the actual CAD layout with clickable
+        strings (Etapa 2).
       </p>
       <div className="grid grid-cols-4 gap-2 sm:grid-cols-6 lg:grid-cols-9">
         {blocks.map((b) => {
@@ -64,11 +65,19 @@ export default function MapView() {
         (() => {
           const stats = blockStats(selectedBlock);
           return (
-            <div className="mt-4 grid grid-cols-2 gap-3 rounded-xl border border-border bg-bg-panel p-4 text-sm sm:grid-cols-4">
-              <div>Block {selectedBlock}</div>
-              <div>{stats.total} panels</div>
-              <div>{stats.issue} with issues</div>
-              <div>{stats.pending} pending replacement</div>
+            <div className="mt-4 rounded-xl border border-border bg-bg-panel p-4">
+              <div className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
+                <div>Block {selectedBlock}</div>
+                <div>{stats.total} panels</div>
+                <div>{stats.issue} with issues</div>
+                <div>{stats.pending} pending replacement</div>
+              </div>
+              <button
+                onClick={() => navigate(`/map/block/${selectedBlock}`)}
+                className="mt-3 rounded-lg bg-accent-blue px-4 py-2 text-sm font-semibold text-white"
+              >
+                View real plan →
+              </button>
             </div>
           );
         })()}
