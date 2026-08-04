@@ -70,7 +70,7 @@ export default function PanelStrip({ title, panels }: Props) {
           <span className="text-slate-400">Pos {active.locationId.split('.').pop()}</span>
           <span className="font-mono text-slate-200">{active.serialNumber}</span>
           <span className="text-slate-400">{active.status}</span>
-          <button onClick={() => copy(active.locationId)} className="text-accent-blue">
+          <button onClick={() => copy(active.serialNumber)} className="text-accent-blue">
             Copy
           </button>
         </div>
