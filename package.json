@@ -21,7 +21,8 @@
     "jspdf-autotable": "^3.8.3",
     "papaparse": "^5.4.1",
     "lucide-react": "^0.441.0",
-    "xlsx": "^0.18.5"
+    "xlsx": "^0.18.5",
+    "@zxing/browser": "^0.1.5"
   },
   "devDependencies": {
     "@types/react": "^18.3.5",
