@@ -4,7 +4,7 @@ import { db } from '@/lib/db';
 import {
   loadBlockGeometry,
   blockImageUrl,
-  computeTrackerBoxSize,
+  computeTrackerBoxSizes,
   type BlockGeometry,
   type GeometryString,
 } from '@/lib/geometry';
@@ -130,7 +130,10 @@ export default function BlockView() {
     return acc;
   }
 
-  const boxSize = useMemo(() => (geometry ? computeTrackerBoxSize(geometry) : { w: 20, h: 20 }), [geometry]);
+  const boxSizes = useMemo(
+    () => (geometry ? computeTrackerBoxSizes(geometry) : new Map<string, { w: number; h: number }>()),
+    [geometry]
+  );
 
   function panelsForStringCode(code: string): Panel[] {
     const parts = parseStringCode(code);
@@ -216,41 +219,31 @@ export default function BlockView() {
             <ZoomPan aspectRatio={geometry.w / geometry.h}>
               <svg viewBox={`0 0 ${geometry.w} ${geometry.h}`} className="absolute inset-0 h-full w-full" style={{ background: '#0b1220' }}>
                 {geometry.axis === 'x' ? (
-                  <rect x={geometry.road - boxSize.w * 0.3} y={0} width={Math.max(2, boxSize.w * 0.6)} height={geometry.h} fill="#182236" />
+                  <rect x={geometry.road - geometry.w / 220} y={0} width={Math.max(2, geometry.w / 110)} height={geometry.h} fill="#182236" />
                 ) : (
-                  <rect x={0} y={geometry.road - boxSize.h * 0.3} width={geometry.w} height={Math.max(2, boxSize.h * 0.6)} fill="#182236" />
+                  <rect x={0} y={geometry.road - geometry.h / 220} width={geometry.w} height={Math.max(2, geometry.h / 110)} fill="#182236" />
                 )}
                 {Object.entries(geometry.trackers).map(([key, t]) => {
                   const trackerNum = key.split('-')[1];
                   const rows = [...t.rows].sort();
-                  const stripH = boxSize.h / Math.max(1, rows.length);
-                  const labelFont = Math.max(5, Math.min(boxSize.w, boxSize.h) * 0.32);
-                  const rowFont = Math.max(4.5, Math.min(boxSize.w * 0.18, stripH * 0.62));
+                  const box = boxSizes.get(key) ?? { w: 10, h: 10 };
+                  const stripH = box.h / Math.max(1, rows.length);
+                  const labelFont = Math.max(4, Math.min(box.w, box.h) * 0.34);
                   const isSelectedTracker = selectedTrackerNum === trackerNum;
                   return (
                     <g key={key}>
-                      <text
-                        x={t.cx}
-                        y={t.cy - boxSize.h / 2 - labelFont * 0.35}
-                        textAnchor="middle"
-                        fontSize={labelFont}
-                        fill="rgba(226,232,240,0.75)"
-                        style={{ pointerEvents: 'none' }}
-                      >
-                        {trackerNum}
-                      </text>
                       {rows.map((row, i) => {
                         const strs = stringsByTrackerRow.get(`${trackerNum}-${row}`) ?? [];
                         const agg = combinedAgg(strs);
-                        const y = t.cy - boxSize.h / 2 + i * stripH;
+                        const y = t.cy - box.h / 2 + i * stripH;
                         return (
                           <rect
                             key={row}
-                            x={t.cx - boxSize.w / 2}
+                            x={t.cx - box.w / 2}
                             y={y}
-                            width={boxSize.w}
+                            width={box.w}
                             height={stripH}
-                            rx={Math.min(boxSize.w, stripH) * 0.12}
+                            rx={Math.min(box.w, stripH) * 0.12}
                             fill={statusColor(agg)}
                             stroke={isSelectedTracker ? '#4A90D9' : 'rgba(255,255,255,0.35)'}
                             strokeWidth={isSelectedTracker ? 2.5 : 1}
@@ -259,24 +252,18 @@ export default function BlockView() {
                           />
                         );
                       })}
-                      {rows.map((row, i) => {
-                        const y = t.cy - boxSize.h / 2 + i * stripH + stripH / 2;
-                        return (
-                          <text
-                            key={row + '-label'}
-                            x={t.cx}
-                            y={y}
-                            textAnchor="middle"
-                            dominantBaseline="central"
-                            fontSize={rowFont}
-                            fontWeight={600}
-                            fill="rgba(11,18,32,0.8)"
-                            style={{ pointerEvents: 'none' }}
-                          >
-                            {row}
-                          </text>
-                        );
-                      })}
+                      <text
+                        x={t.cx}
+                        y={t.cy}
+                        textAnchor="middle"
+                        dominantBaseline="central"
+                        fontSize={labelFont}
+                        fontWeight={600}
+                        fill="rgba(11,18,32,0.85)"
+                        style={{ pointerEvents: 'none' }}
+                      >
+                        {trackerNum}
+                      </text>
                     </g>
                   );
                 })}
@@ -285,7 +272,7 @@ export default function BlockView() {
                     key={d.name}
                     cx={d.x}
                     cy={d.y}
-                    r={Math.max(2, Math.min(boxSize.w, boxSize.h) * 0.16)}
+                    r={Math.max(2, Math.min(geometry.w, geometry.h) / 220)}
                     fill="#F1C232"
                     stroke="#0b1220"
                     strokeWidth={1}

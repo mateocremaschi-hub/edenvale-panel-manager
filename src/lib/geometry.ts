@@ -78,45 +78,33 @@ export function blockImageUrl(block: number): string {
   return `/geometry/images/${pad2(block)}.png`;
 }
 
-function median(nums: number[]): number {
-  if (nums.length === 0) return 0;
-  const sorted = [...nums].sort((a, b) => a - b);
-  const mid = Math.floor(sorted.length / 2);
-  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
-}
-
 function clamp(v: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, v));
 }
 
-/** Gaps between DISTINCT clusters of values (trackers sharing a column/row have near-identical
- * cx/cy; naively diffing every sorted point would mix those near-zero gaps in with the real
- * inter-column/row pitch and badly skew the median). */
-function clusterGaps(vals: number[], tolerance = 10): number[] {
-  const sorted = [...vals].sort((a, b) => a - b);
-  const clusters: number[][] = [];
-  for (const v of sorted) {
-    const last = clusters[clusters.length - 1];
-    if (last && v - last[last.length - 1] < tolerance) last.push(v);
-    else clusters.push([v]);
-  }
-  const centers = clusters.map((c) => c.reduce((a, b) => a + b, 0) / c.length);
-  const gaps: number[] = [];
-  for (let i = 1; i < centers.length; i++) gaps.push(centers[i] - centers[i - 1]);
-  return gaps;
-}
-
-/** Reasonable tracker box size for the schematic view: a fraction of the median gap between
- * neighbouring tracker columns/rows, so boxes fill the space without overlapping. Approximate --
- * we don't have the exact drawn tracker footprint, just its center point. Clamped to a safe
- * range so irregular (rotated/diagonal) blocks never get invisible or overlapping boxes. */
-export function computeTrackerBoxSize(geometry: BlockGeometry): { w: number; h: number } {
-  const trackers = Object.values(geometry.trackers);
-  const gx = median(clusterGaps(trackers.map((t) => t.cx))) || geometry.w / 20;
-  const gy = median(clusterGaps(trackers.map((t) => t.cy))) || geometry.h / 20;
+/** Per-tracker box size for the schematic view, sized from EACH tracker's own distance to
+ * its nearest neighbour (not a single block-wide size). This guarantees no two tracker boxes
+ * ever overlap, however irregular the block's layout is (some blocks mix a dense cluster of
+ * special trackers with a regular grid elsewhere -- a single global size overlapped there). */
+export function computeTrackerBoxSizes(geometry: BlockGeometry): Map<string, { w: number; h: number }> {
+  const entries = Object.entries(geometry.trackers);
   const minDim = Math.min(geometry.w, geometry.h);
-  return {
-    w: clamp(gx * 0.82, minDim / 150, minDim / 6),
-    h: clamp(gy * 0.82, minDim / 150, minDim / 6),
-  };
+  const fallback = minDim / 15;
+  const maxSize = minDim / 6;
+  const sizes = new Map<string, { w: number; h: number }>();
+
+  for (const [key, t] of entries) {
+    let nearest = Infinity;
+    for (const [key2, t2] of entries) {
+      if (key2 === key) continue;
+      const d = Math.hypot(t.cx - t2.cx, t.cy - t2.cy);
+      if (d > 1 && d < nearest) nearest = d;
+    }
+    if (!Number.isFinite(nearest)) nearest = fallback;
+    // 0.42 of the nearest-neighbour distance on each tracker keeps every pair's combined
+    // half-widths under that distance (0.42 + 0.42 = 0.84 < 1), so boxes never touch.
+    const size = clamp(nearest * 0.42, minDim / 300, maxSize);
+    sizes.set(key, { w: size, h: size });
+  }
+  return sizes;
 }
