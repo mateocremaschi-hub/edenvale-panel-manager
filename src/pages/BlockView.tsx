@@ -228,7 +228,7 @@ export default function BlockView() {
                   const rows = [...t.rows].sort();
                   const box = boxSizes.get(key) ?? { w: 10, h: 10 };
                   const stripH = box.h / Math.max(1, rows.length);
-                  const labelFont = Math.max(4, Math.min(box.w, box.h) * 0.34);
+                  const labelFont = Math.max(6, Math.min(box.w, box.h) * 0.55);
                   const isSelectedTracker = selectedTrackerNum === trackerNum;
                   return (
                     <g key={key}>
@@ -258,8 +258,11 @@ export default function BlockView() {
                         textAnchor="middle"
                         dominantBaseline="central"
                         fontSize={labelFont}
-                        fontWeight={600}
-                        fill="rgba(11,18,32,0.85)"
+                        fontWeight={700}
+                        fill="#ffffff"
+                        stroke="#0b1220"
+                        strokeWidth={labelFont * 0.12}
+                        paintOrder="stroke"
                         style={{ pointerEvents: 'none' }}
                       >
                         {trackerNum}
