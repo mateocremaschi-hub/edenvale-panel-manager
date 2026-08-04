@@ -106,38 +106,21 @@ function clusterGaps(vals: number[], tolerance = 10): number[] {
   return gaps;
 }
 
-/** Per-tracker box size for the schematic view: starts from a "typical" size for the whole
- * block (the median column/row pitch, so most trackers render nice and big -- filling the
- * space instead of leaving it mostly empty), then shrinks JUST the trackers that are locally
- * tighter than that on a given axis, so nothing overlaps. Axes are handled independently
- * (only "same row" neighbours count for width, only "same column" neighbours for height) so
- * a block with wide columns but tight rows doesn't get squeezed on both axes at once. */
+/** Uniform box size for every tracker in the block, from the block's own typical
+ * column/row pitch. Deliberately NOT varied per tracker -- an earlier per-tracker "shrink
+ * near close neighbours" version produced an inconsistent patchwork of very different sizes
+ * within the same block, which looked worse than the rare tight spot touching slightly. If a
+ * specific block still has genuine overlap, that's a block-specific tweak, not a general one. */
 export function computeTrackerBoxSizes(geometry: BlockGeometry): Map<string, { w: number; h: number }> {
-  const entries = Object.entries(geometry.trackers);
-  const trackers = entries.map(([, t]) => t);
+  const trackers = Object.values(geometry.trackers);
   const minDim = Math.min(geometry.w, geometry.h);
 
   const globalGx = median(clusterGaps(trackers.map((t) => t.cx))) || geometry.w / 20;
   const globalGy = median(clusterGaps(trackers.map((t) => t.cy))) || geometry.h / 20;
-  const globalW = clamp(globalGx * 0.82, minDim / 150, minDim / 6);
-  const globalH = clamp(globalGy * 0.82, minDim / 150, minDim / 6);
-  const rowTolerance = Math.max(globalGy * 0.6, 5); // "same row" band, scaled to this block's own row pitch
-  const colTolerance = Math.max(globalGx * 0.6, 5); // "same column" band, scaled to this block's own column pitch
+  const w = clamp(globalGx * 0.82, minDim / 150, minDim / 6);
+  const h = clamp(globalGy * 0.82, minDim / 150, minDim / 6);
 
   const sizes = new Map<string, { w: number; h: number }>();
-  for (const [key, t] of entries) {
-    let nearestX = Infinity;
-    let nearestY = Infinity;
-    for (const t2 of trackers) {
-      if (t2 === t) continue;
-      const dx = Math.abs(t.cx - t2.cx);
-      const dy = Math.abs(t.cy - t2.cy);
-      if (dy < rowTolerance && dx > 1 && dx < nearestX) nearestX = dx;
-      if (dx < colTolerance && dy > 1 && dy < nearestY) nearestY = dy;
-    }
-    const w = Number.isFinite(nearestX) ? clamp(Math.min(globalW, nearestX * 0.42), minDim / 300, minDim / 6) : globalW;
-    const h = Number.isFinite(nearestY) ? clamp(Math.min(globalH, nearestY * 0.42), minDim / 300, minDim / 6) : globalH;
-    sizes.set(key, { w, h });
-  }
+  for (const key of Object.keys(geometry.trackers)) sizes.set(key, { w, h });
   return sizes;
 }
