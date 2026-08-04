@@ -48,6 +48,7 @@ export default function BlockView() {
   const { blockNum } = useParams<{ blockNum: string }>();
   const navigate = useNavigate();
   const block = Number(blockNum);
+  const bpad = String(block).padStart(2, '0');
 
   const [viewMode, setViewMode] = useState<'schematic' | 'photo'>('schematic');
   const [geometry, setGeometry] = useState<BlockGeometry | null>(null);
@@ -55,14 +56,15 @@ export default function BlockView() {
   const [blockLocations, setBlockLocations] = useState<PhysicalLocation[]>([]);
   const [blockPanels, setBlockPanels] = useState<Panel[]>([]);
 
-  const [selectedString, setSelectedString] = useState<GeometryString | null>(null);
-  const [selectedPanels, setSelectedPanels] = useState<Panel[]>([]);
+  const [selectedTrackerNum, setSelectedTrackerNum] = useState<string | null>(null);
+  const [selectedRows, setSelectedRows] = useState<GeometryString[]>([]);
 
   useEffect(() => {
     if (!Number.isFinite(block)) return;
     setGeometry(null);
     setError(null);
-    setSelectedString(null);
+    setSelectedTrackerNum(null);
+    setSelectedRows([]);
     loadBlockGeometry(block)
       .then(setGeometry)
       .catch((err) => setError(err instanceof Error ? err.message : String(err)));
@@ -100,16 +102,33 @@ export default function BlockView() {
     return byString;
   }, [blockPanels, locById]);
 
-  // tracker number + row -> the GeometryString for that specific row, so each row-strip
-  // can be tapped straight through to its own string (not the whole tracker).
-  const stringByTrackerRow = useMemo(() => {
-    const map = new Map<string, GeometryString>();
+  // tracker number + row -> ALL GeometryStrings for that row (each row is actually 2
+  // separate strings, not 1 -- confirmed against the real data).
+  const stringsByTrackerRow = useMemo(() => {
+    const map = new Map<string, GeometryString[]>();
     if (!geometry) return map;
     for (const s of geometry.strings) {
-      if (s.t && s.r) map.set(`${s.t}-${s.r}`, s);
+      if (s.t && s.r) {
+        const key = `${s.t}-${s.r}`;
+        const arr = map.get(key) ?? [];
+        arr.push(s);
+        map.set(key, arr);
+      }
     }
     return map;
   }, [geometry]);
+
+  function combinedAgg(strings: GeometryString[]): StringAgg | undefined {
+    let acc: StringAgg | undefined;
+    for (const s of strings) {
+      const a = statusByString.get(s.n);
+      if (!a) continue;
+      acc = acc
+        ? { total: acc.total + a.total, issue: acc.issue + a.issue, pending: acc.pending + a.pending, replaced: acc.replaced + a.replaced }
+        : { ...a };
+    }
+    return acc;
+  }
 
   const boxSize = useMemo(() => (geometry ? computeTrackerBoxSize(geometry) : { w: 20, h: 20 }), [geometry]);
 
@@ -122,10 +141,17 @@ export default function BlockView() {
       .sort((a, b) => Number(a.locationId.split('.').pop()) - Number(b.locationId.split('.').pop()));
   }
 
-  function openString(s: GeometryString) {
-    setSelectedString(s);
-    setSelectedPanels(panelsForStringCode(s.n));
+  /** Selects the WHOLE tracker (all its rows/strings together) -- a double tracker with
+   * R4+R5 is two separate 28-panel strings, and you want to see both without hunting for
+   * the second one. */
+  function openTrackerByNum(trackerNum: string) {
+    if (!geometry) return;
+    setSelectedTrackerNum(trackerNum);
+    const rows = geometry.strings.filter((s) => s.t === trackerNum).sort((a, b) => (a.r ?? '').localeCompare(b.r ?? ''));
+    setSelectedRows(rows);
   }
+
+  const selectedTrackerInfo = selectedTrackerNum ? geometry?.trackers[`${bpad}-${selectedTrackerNum}`] : undefined;
 
   if (!Number.isFinite(block)) {
     return <div className="text-sm text-status-pending">Invalid block number.</div>;
@@ -169,7 +195,7 @@ export default function BlockView() {
 
           <p className="mb-2 text-xs text-slate-500">
             {geometry.strings.length} strings · {Object.keys(geometry.trackers).length} trackers ·{' '}
-            {geometry.dcbox.length} DC boxes. Pinch or scroll to zoom, drag to pan, tap a string.
+            {geometry.dcbox.length} DC boxes. Pinch or scroll to zoom, drag to pan, tap a tracker row.
           </p>
           <div className="mb-3 flex flex-wrap items-center gap-3">
             {LEGEND.map((l) => (
@@ -200,6 +226,7 @@ export default function BlockView() {
                   const stripH = boxSize.h / Math.max(1, rows.length);
                   const labelFont = Math.max(5, Math.min(boxSize.w, boxSize.h) * 0.32);
                   const rowFont = Math.max(4.5, Math.min(boxSize.w * 0.18, stripH * 0.62));
+                  const isSelectedTracker = selectedTrackerNum === trackerNum;
                   return (
                     <g key={key}>
                       <text
@@ -213,9 +240,8 @@ export default function BlockView() {
                         {trackerNum}
                       </text>
                       {rows.map((row, i) => {
-                        const s = stringByTrackerRow.get(`${trackerNum}-${row}`);
-                        const agg = s ? statusByString.get(s.n) : undefined;
-                        const isSelected = !!s && selectedString?.n === s.n;
+                        const strs = stringsByTrackerRow.get(`${trackerNum}-${row}`) ?? [];
+                        const agg = combinedAgg(strs);
                         const y = t.cy - boxSize.h / 2 + i * stripH;
                         return (
                           <rect
@@ -226,10 +252,10 @@ export default function BlockView() {
                             height={stripH}
                             rx={Math.min(boxSize.w, stripH) * 0.12}
                             fill={statusColor(agg)}
-                            stroke={isSelected ? '#4A90D9' : 'rgba(255,255,255,0.35)'}
-                            strokeWidth={isSelected ? 2.5 : 1}
-                            onClick={() => s && openString(s)}
-                            style={{ cursor: s ? 'pointer' : 'default' }}
+                            stroke={isSelectedTracker ? '#4A90D9' : 'rgba(255,255,255,0.35)'}
+                            strokeWidth={isSelectedTracker ? 2.5 : 1}
+                            onClick={() => openTrackerByNum(trackerNum)}
+                            style={{ cursor: 'pointer' }}
                           />
                         );
                       })}
@@ -277,11 +303,11 @@ export default function BlockView() {
                 const top = ((s.y - s.h / 2) / geometry.h) * 100;
                 const width = (s.w / geometry.w) * 100;
                 const height = (s.h / geometry.h) * 100;
-                const isSelected = selectedString?.n === s.n;
+                const isSelected = !!s.t && selectedTrackerNum === s.t;
                 return (
                   <button
                     key={s.n}
-                    onClick={() => openString(s)}
+                    onClick={() => s.t && openTrackerByNum(s.t)}
                     title={s.n}
                     className="absolute rounded-[1px]"
                     style={{
@@ -300,15 +326,21 @@ export default function BlockView() {
         </>
       )}
 
-      {selectedString && (
+      {selectedTrackerNum && (
         <div className="mt-4 rounded-xl border border-border bg-bg-panel p-4">
-          <div className="mb-2 flex items-center justify-between">
-            <span className="font-mono text-sm text-slate-100">{selectedString.n}</span>
+          <div className="mb-3 flex items-center justify-between">
+            <span className="font-mono text-sm text-slate-100">Tracker {bpad}-{selectedTrackerNum}</span>
             <span className="text-xs text-slate-400">
-              Tracker {selectedString.t ?? '-'} {selectedString.r ?? ''} · {selectedString.s}
+              {selectedTrackerInfo?.side ?? '-'} · pos {selectedTrackerInfo?.pos ?? '-'}/{selectedTrackerInfo?.pos_total ?? '-'} from road
+              · DC box {selectedTrackerInfo?.dcbox ?? '-'}
             </span>
           </div>
-          <PanelStrip panels={selectedPanels} />
+          <div className="flex flex-col gap-4">
+            {selectedRows.length === 0 && <p className="text-sm text-slate-500">No strings mapped to this tracker.</p>}
+            {selectedRows.map((s) => (
+              <PanelStrip key={s.n} title={`${s.r ?? ''} · ${s.n}`} panels={panelsForStringCode(s.n)} />
+            ))}
+          </div>
         </div>
       )}
     </div>
