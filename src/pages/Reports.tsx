@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useNavigate } from 'react-router-dom';
 import { db } from '@/lib/db';
@@ -31,7 +31,23 @@ export default function Reports() {
   const navigate = useNavigate();
   const { operatorId, operatorName } = useSession();
   const issues = useLiveQuery(() => db.issues.orderBy('reportedDate').reverse().toArray(), [], []);
+  const panels = useLiveQuery(() => db.panels.toArray(), [], []);
+  const panelByLocation = useMemo(() => new Map((panels ?? []).map((p) => [p.locationId, p])), [panels]);
   const [expandedIssueId, setExpandedIssueId] = useState<string | null>(null);
+
+  // Self-healing: if a panel already shows "replaced" but its report never got updated to
+  // match (whatever caused that), fix it quietly in the background instead of leaving the
+  // report stuck open forever.
+  useEffect(() => {
+    if (!issues || !panels) return;
+    const stale = issues.filter((i) => {
+      if (i.status === 'replaced' || i.status === 'closed') return false;
+      return panelByLocation.get(i.locationId)?.status === 'replaced';
+    });
+    if (stale.length === 0) return;
+    db.issues.bulkPut(stale.map((i) => ({ ...i, status: 'replaced' as const, syncStatus: 'pending' as const })));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [issues, panels]);
 
   const [open, setOpen] = useState(false);
   const [scannerOpen, setScannerOpen] = useState(false);
@@ -347,7 +363,9 @@ export default function Reports() {
       <div className="flex flex-col gap-2">
         {(issues ?? []).map((i) => {
           const expanded = expandedIssueId === i.issueId;
-          const isActionable = i.status !== 'replaced' && i.status !== 'closed';
+          const panelNow = panelByLocation.get(i.locationId);
+          const alreadyReplacedInReality = panelNow?.status === 'replaced';
+          const isActionable = i.status !== 'replaced' && i.status !== 'closed' && !alreadyReplacedInReality;
           return (
             <div key={i.issueId} className="rounded-xl border border-border bg-bg-panel p-3">
               <button
@@ -362,7 +380,7 @@ export default function Reports() {
               </div>
               {i.description && <div className="mt-1 text-sm text-slate-300">{i.description}</div>}
               {expanded && (
-                <div className="mt-3 flex flex-wrap gap-2 border-t border-border pt-3">
+                <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-border pt-3">
                   {isActionable ? (
                     <>
                       <button
@@ -379,12 +397,19 @@ export default function Reports() {
                       </button>
                     </>
                   ) : (
-                    <button
-                      onClick={() => reopenIssue(i)}
-                      className="rounded-lg border border-border px-3 py-2 text-xs text-slate-300"
-                    >
-                      Reopen
-                    </button>
+                    <>
+                      {alreadyReplacedInReality && i.status !== 'replaced' && i.status !== 'closed' && (
+                        <span className="text-xs text-slate-500">
+                          The panel at this location already shows "replaced" -- marking this report to match.
+                        </span>
+                      )}
+                      <button
+                        onClick={() => reopenIssue(i)}
+                        className="rounded-lg border border-border px-3 py-2 text-xs text-slate-300"
+                      >
+                        Reopen
+                      </button>
+                    </>
                   )}
                 </div>
               )}

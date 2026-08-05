@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '@/lib/db';
 import { hasSupabase } from '@/lib/supabase';
+import { pullLocationsAndPanels, type SyncProgress } from '@/lib/sync';
 import { syncOperationalRecords } from '@/lib/outboxSync';
 
 export default function Sync() {
@@ -10,6 +11,10 @@ export default function Sync() {
   const [error, setError] = useState<string | null>(null);
   const [lastSync, setLastSync] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
+  const [fullProgress, setFullProgress] = useState<SyncProgress | null>(null);
+  const [fullSyncing, setFullSyncing] = useState(false);
+  const [fullError, setFullError] = useState<string | null>(null);
+  const [fullDone, setFullDone] = useState(false);
 
   const counts = useLiveQuery(
     async () => ({
@@ -52,6 +57,21 @@ export default function Sync() {
     }
   }
 
+  async function fullResync() {
+    setFullError(null);
+    setFullDone(false);
+    setFullSyncing(true);
+    try {
+      await pullLocationsAndPanels(setFullProgress);
+      setFullDone(true);
+    } catch (err) {
+      setFullError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setFullSyncing(false);
+      setFullProgress(null);
+    }
+  }
+
   return (
     <div>
       <h1 className="mb-4 text-lg font-semibold text-slate-100">Sync</h1>
@@ -71,6 +91,39 @@ export default function Sync() {
           </>
         )}
       </div>
+
+      {configured && (
+        <div className="mt-4 rounded-xl border border-border bg-bg-panel p-4">
+          <h2 className="mb-2 text-sm font-semibold text-slate-200">Locations & panels</h2>
+          <p className="mb-3 text-xs text-slate-500">
+            If this device is missing blocks or panels (e.g. the first download got interrupted), use this
+            to re-download everything from the server.
+          </p>
+          {fullError && <div className="mb-3 rounded-lg bg-status-pending/20 p-2 text-xs text-status-pending">{fullError}</div>}
+          {fullDone && <div className="mb-3 rounded-lg bg-status-replaced/20 p-2 text-xs text-status-replaced">Re-sync complete.</div>}
+          {fullProgress ? (
+            <div>
+              <p className="mb-1 text-xs text-slate-400">
+                {fullProgress.phase}... {fullProgress.done.toLocaleString()} / {fullProgress.total.toLocaleString()}
+              </p>
+              <div className="h-2 w-full overflow-hidden rounded-full bg-bg">
+                <div
+                  className="h-full bg-accent-blue transition-all"
+                  style={{ width: `${fullProgress.total ? (fullProgress.done / fullProgress.total) * 100 : 0}%` }}
+                />
+              </div>
+            </div>
+          ) : (
+            <button
+              onClick={fullResync}
+              disabled={fullSyncing}
+              className="rounded-lg border border-accent-blue px-4 py-2 text-sm font-semibold text-accent-blue disabled:opacity-40"
+            >
+              Re-download all locations & panels
+            </button>
+          )}
+        </div>
+      )}
 
       {configured && (
         <div className="mt-4 rounded-xl border border-border bg-bg-panel p-4">

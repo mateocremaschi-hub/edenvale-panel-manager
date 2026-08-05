@@ -24,14 +24,14 @@ const LEGEND: { label: string; color: string }[] = [
   { label: 'Normal', color: 'rgba(91,114,144,0.55)' },
   { label: 'Issue reported', color: 'rgba(224,138,60,0.75)' },
   { label: 'Pending replacement', color: 'rgba(217,83,79,0.75)' },
-  { label: 'Replaced', color: 'rgba(92,184,92,0.7)' },
 ];
 
+// A replaced panel is back to normal -- no color, so the map only draws attention to what
+// still needs action (open issues, pending replacements), not to work already done.
 function statusColor(agg: StringAgg | undefined): string {
   if (!agg || agg.total === 0) return LEGEND[0].color;
   if (agg.pending > 0) return LEGEND[2].color;
   if (agg.issue > 0) return LEGEND[1].color;
-  if (agg.replaced === agg.total) return LEGEND[3].color;
   return LEGEND[0].color;
 }
 

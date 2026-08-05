@@ -166,5 +166,6 @@ export interface Photo {
   takenAt: string;
   author: string; // operatorId
   description?: string;
+  photoRole?: 'before' | 'after';
   syncStatus: SyncStatus;
 }

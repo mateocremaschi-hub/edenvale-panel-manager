@@ -34,7 +34,6 @@ export default function MapView() {
   function blockColor(stats: ReturnType<typeof blockStats>) {
     if (stats.pending > 0) return 'bg-status-pending';
     if (stats.issue > 0) return 'bg-status-reported';
-    if (stats.replaced > 0) return 'bg-status-replaced';
     return 'bg-status-normal';
   }
 

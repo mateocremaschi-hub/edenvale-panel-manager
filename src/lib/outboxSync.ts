@@ -139,6 +139,7 @@ function photoToRow(p: Photo) {
     taken_at: p.takenAt,
     author: p.author,
     description: p.description ?? null,
+    photo_role: p.photoRole ?? null,
   };
 }
 
@@ -256,6 +257,7 @@ export async function pullOperationalRecords(onStatus?: (text: string) => void):
       takenAt: row.taken_at,
       author: row.author,
       description: row.description ?? undefined,
+      photoRole: row.photo_role ?? undefined,
       syncStatus: 'synced',
     });
     pulledPhotos++;

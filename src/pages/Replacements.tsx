@@ -7,12 +7,14 @@ import { useSettings } from '@/store/settings';
 import { newId } from '@/lib/id';
 import { nowIso, formatDateTime } from '@/lib/time';
 import { compressImage } from '@/lib/photo';
+import { generateReplacementsPdf } from '@/lib/pdfReport';
 import type { Replacement, Photo } from '@/lib/types';
 import BarcodeScanner from '@/components/BarcodeScanner';
 
 interface PendingPhoto {
   file: File;
   previewUrl: string;
+  role: 'before' | 'after';
 }
 
 export default function Replacements() {
@@ -194,8 +196,16 @@ export default function Replacements() {
   }
 
   function addPhotos(files: FileList) {
-    const next: PendingPhoto[] = Array.from(files).map((file) => ({ file, previewUrl: URL.createObjectURL(file) }));
+    const next: PendingPhoto[] = Array.from(files).map((file) => ({
+      file,
+      previewUrl: URL.createObjectURL(file),
+      role: 'after' as const,
+    }));
     setPhotos((p) => [...p, ...next]);
+  }
+
+  function togglePhotoRole(index: number) {
+    setPhotos((p) => p.map((ph, i) => (i === index ? { ...ph, role: ph.role === 'before' ? 'after' : 'before' } : ph)));
   }
 
   function removePhoto(index: number) {
@@ -239,6 +249,7 @@ export default function Replacements() {
             blob,
             takenAt: nowIso(),
             author: operatorId!,
+            photoRole: p.role,
             syncStatus: 'pending' as const,
           };
         })
@@ -269,17 +280,16 @@ export default function Replacements() {
           voltage: voltageNum,
           status: 'replaced',
         });
-        if (current.issueId) {
-          await db.issues.update(current.issueId, { status: 'replaced' });
-        } else {
-          const openIssue = await db.issues
-            .where('locationId')
-            .equals(current.locationId)
-            .filter((i) => i.status !== 'closed' && i.status !== 'replaced')
-            .first();
-          if (openIssue) {
-            await db.issues.update(openIssue.issueId, { status: 'replaced' });
-          }
+        // Close every open report at this location, not just one -- if more than one was
+        // ever logged here, a replacement resolves all of them, not just whichever happened
+        // to be found first.
+        const openIssues = await db.issues
+          .where('locationId')
+          .equals(current.locationId)
+          .filter((i) => i.status !== 'closed' && i.status !== 'replaced')
+          .toArray();
+        for (const issue of openIssues) {
+          await db.issues.update(issue.issueId, { status: 'replaced' });
         }
         await db.activityEvents.add({
           eventId: newId('evt'),
@@ -313,6 +323,34 @@ export default function Replacements() {
 
   async function updateSm(replacementId: string, patch: { smUploaded?: boolean; sunManagerId?: string }) {
     await db.replacements.update(replacementId, { ...patch, syncStatus: 'pending' });
+  }
+
+  const [pdfFrom, setPdfFrom] = useState('');
+  const [pdfTo, setPdfTo] = useState('');
+  const [pdfBlock, setPdfBlock] = useState('');
+  const [pdfGenerating, setPdfGenerating] = useState(false);
+  const [pdfStatus, setPdfStatus] = useState<string | null>(null);
+  const [pdfError, setPdfError] = useState<string | null>(null);
+  const [pdfOpen, setPdfOpen] = useState(false);
+
+  async function downloadPdf() {
+    setPdfError(null);
+    setPdfGenerating(true);
+    try {
+      const blob = await generateReplacementsPdf({ fromDate: pdfFrom || undefined, toDate: pdfTo || undefined, block: pdfBlock || undefined }, setPdfStatus);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      const parts = ['replacement-report', pdfBlock ? `block-${pdfBlock}` : 'all-blocks', pdfFrom || 'start', pdfTo || 'now'];
+      a.download = `${parts.join('_')}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setPdfError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setPdfGenerating(false);
+      setPdfStatus(null);
+    }
   }
 
   return (
@@ -497,13 +535,23 @@ export default function Replacements() {
                 <label className="mb-1 block text-xs text-slate-400">Photos (before/after)</label>
                 <div className="flex flex-wrap gap-2">
                   {photos.map((p, i) => (
-                    <div key={i} className="relative h-16 w-16 overflow-hidden rounded-lg border border-border">
-                      <img src={p.previewUrl} className="h-full w-full object-cover" alt="" />
+                    <div key={i} className="flex flex-col items-center gap-1">
+                      <div className="relative h-16 w-16 overflow-hidden rounded-lg border border-border">
+                        <img src={p.previewUrl} className="h-full w-full object-cover" alt="" />
+                        <button
+                          onClick={() => removePhoto(i)}
+                          className="absolute right-0 top-0 rounded-bl bg-black/60 px-1.5 text-xs text-white"
+                        >
+                          ×
+                        </button>
+                      </div>
                       <button
-                        onClick={() => removePhoto(i)}
-                        className="absolute right-0 top-0 rounded-bl bg-black/60 px-1.5 text-xs text-white"
+                        onClick={() => togglePhotoRole(i)}
+                        className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                          p.role === 'before' ? 'bg-status-pending/30 text-status-pending' : 'bg-status-replaced/30 text-status-replaced'
+                        }`}
                       >
-                        ×
+                        {p.role === 'before' ? 'Before' : 'After'}
                       </button>
                     </div>
                   ))}
@@ -547,6 +595,64 @@ export default function Replacements() {
           )}
         </div>
       )}
+
+      <div className="mb-3 rounded-xl border border-border bg-bg-panel p-4">
+        <button onClick={() => setPdfOpen((v) => !v)} className="flex w-full items-center justify-between text-left">
+          <span className="text-sm font-semibold text-slate-200">📄 Download PDF report</span>
+          <span className="text-xs text-accent-blue">{pdfOpen ? 'Hide' : 'Show'}</span>
+        </button>
+        {pdfOpen && (
+          <div className="mt-3 flex flex-col gap-2">
+            <p className="text-xs text-slate-500">
+              Includes location, dates, serials, who replaced it, voltage, SunManager status, and any
+              before/after photos attached.
+            </p>
+            {pdfError && <div className="rounded-lg bg-status-pending/20 p-2 text-xs text-status-pending">{pdfError}</div>}
+            <div className="flex flex-wrap gap-2">
+              <div className="flex flex-col gap-1">
+                <label className="text-xs text-slate-500">From</label>
+                <input
+                  type="date"
+                  value={pdfFrom}
+                  onChange={(e) => setPdfFrom(e.target.value)}
+                  className="rounded-lg border border-border bg-bg px-3 py-2 text-sm text-slate-100"
+                />
+              </div>
+              <div className="flex flex-col gap-1">
+                <label className="text-xs text-slate-500">To</label>
+                <input
+                  type="date"
+                  value={pdfTo}
+                  onChange={(e) => setPdfTo(e.target.value)}
+                  className="rounded-lg border border-border bg-bg px-3 py-2 text-sm text-slate-100"
+                />
+              </div>
+              <div className="flex flex-col gap-1">
+                <label className="text-xs text-slate-500">Block</label>
+                <select
+                  value={pdfBlock}
+                  onChange={(e) => setPdfBlock(e.target.value)}
+                  className="rounded-lg border border-border bg-bg px-3 py-2 text-sm text-slate-100"
+                >
+                  <option value="">All blocks</option>
+                  {blocks.map((b) => (
+                    <option key={b} value={b}>
+                      Block {b}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <button
+              onClick={downloadPdf}
+              disabled={pdfGenerating}
+              className="self-start rounded-lg bg-accent-blue px-4 py-2 text-sm font-semibold text-white disabled:opacity-40"
+            >
+              {pdfGenerating ? pdfStatus || 'Generating...' : 'Download PDF'}
+            </button>
+          </div>
+        )}
+      </div>
 
       <div className="mb-3 flex flex-wrap gap-2">
         <select
