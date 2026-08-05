@@ -14,7 +14,7 @@ const en = {
   dashboard_replaced_week: 'Replaced this week',
   dashboard_replaced_month: 'Replaced this month',
   dashboard_replaced_year: 'Replaced this year',
-  dashboard_no_sunmanager: 'Without SunManager ID',
+  dashboard_no_sunmanager: 'Replacements not uploaded to SM',
 
   operator_pick_title: 'Who is working?',
   operator_pick_subtitle: 'Select your name to start. No password needed.',

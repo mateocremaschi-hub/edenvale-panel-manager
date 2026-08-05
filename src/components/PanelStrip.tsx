@@ -15,11 +15,11 @@ function panelStatusColor(status: Panel['status']): string {
     case 'under_assessment':
     case 'monitoring':
       return 'rgba(224,138,60,0.9)';
-    case 'replaced':
-      return 'rgba(92,184,92,0.9)';
     case 'closed':
       return 'rgba(91,114,144,0.45)';
     default:
+      // 'replaced' included here on purpose -- a replaced panel is back to normal, no
+      // color needed to call attention to it.
       return 'rgba(91,114,144,0.85)';
   }
 }

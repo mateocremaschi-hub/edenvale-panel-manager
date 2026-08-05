@@ -28,13 +28,11 @@ export default function Dashboard() {
     [],
     0
   );
-  const noSunManager = useLiveQuery(() => db.issues.filter((i) => !i.sunManagerId).count(), [], 0);
+  const noSunManager = useLiveQuery(() => db.replacements.filter((r) => !r.smUploaded).count(), [], 0);
   const replacements = useLiveQuery(() => db.replacements.toArray(), [], []);
   const dataSourceEntry = useLiveQuery(() => db.meta.get('dataSource'), [], undefined);
   const dataSource = dataSourceEntry?.value ?? 'empty';
 
-  const weekStart = startOf('week').getTime();
-  const monthStart = startOf('month').getTime();
   const yearStart = startOf('year').getTime();
   const countSince = (since: number) =>
     (replacements ?? []).filter((r) => new Date(r.replacementDate).getTime() >= since).length;
@@ -43,8 +41,6 @@ export default function Dashboard() {
     { label: t('dashboard_total_panels'), value: totalPanels },
     { label: t('dashboard_open_issues'), value: openIssues },
     { label: t('dashboard_pending_replacement'), value: pendingReplacement },
-    { label: t('dashboard_replaced_week'), value: countSince(weekStart) },
-    { label: t('dashboard_replaced_month'), value: countSince(monthStart) },
     { label: t('dashboard_replaced_year'), value: countSince(yearStart) },
     { label: t('dashboard_no_sunmanager'), value: noSunManager },
   ];
