@@ -127,6 +127,7 @@ export interface Replacement {
   replacementDate: string; // ISO datetime
   replacedBy: string; // operatorId
   sunManagerId?: string;
+  smUploaded?: boolean;
   reason: string;
   relatedIssueId?: string;
   removedPanelDestination?: string;

@@ -125,10 +125,16 @@ export default function Replacements() {
     setCurrent({ locationId: loc.locationId, serial: panel.serialNumber, voltage: panel.voltage, panelId: panel.panelId });
   }
 
+  const [notFoundSerial, setNotFoundSerial] = useState<string | null>(null);
+  const [reconcileStringCode, setReconcileStringCode] = useState('');
+  const [reconcilePosition, setReconcilePosition] = useState('');
+  const [reconcileError, setReconcileError] = useState<string | null>(null);
+
   async function lookupBySerial(serial: string) {
     setError(null);
     setWarning(null);
     setCurrent(null);
+    setNotFoundSerial(null);
     const trimmed = serial.trim();
     if (!trimmed) {
       setError('Type or scan a serial number.');
@@ -136,11 +142,45 @@ export default function Replacements() {
     }
     const panel = await db.panels.where('serialNumber').equals(trimmed).first();
     if (!panel) {
-      setError(`No panel currently installed with serial "${trimmed}". Try scanning again, or use "Enter location code instead" below.`);
+      setNotFoundSerial(trimmed);
       return;
     }
     setLocationId(panel.locationId);
     setCurrent({ locationId: panel.locationId, serial: panel.serialNumber, voltage: panel.voltage, panelId: panel.panelId });
+  }
+
+  /** The scanned serial doesn't match anything on record -- most likely this panel was
+   * swapped before without being logged. Rather than block the operator, let them say
+   * WHERE it is (string code + position) and continue straight into the normal replacement
+   * form, pre-filled with the serial they just read, so what's really in the field gets
+   * saved either way. */
+  async function registerFieldDiscrepancy() {
+    setReconcileError(null);
+    const code = reconcileStringCode.trim();
+    const pos = Number(reconcilePosition);
+    if (!code || !reconcilePosition || !Number.isInteger(pos) || pos < 1 || pos > 28) {
+      setReconcileError('Enter the string code and a panel position from 1 to 28.');
+      return;
+    }
+    const locId = `${code}.${pos}`;
+    const loc = await db.locations.get(locId);
+    if (!loc) {
+      setReconcileError(`No location "${locId}" in the farm layout -- double check the string code and position.`);
+      return;
+    }
+    const oldPanel = await db.panels.get(locId);
+    setLocationId(locId);
+    setCurrent({
+      locationId: locId,
+      serial: oldPanel?.serialNumber ?? 'unknown (no prior record)',
+      voltage: oldPanel?.voltage,
+      panelId: locId,
+    });
+    setNewSerial(notFoundSerial ?? '');
+    setReason('Found a different panel in the field -- likely replaced before without being logged.');
+    setNotFoundSerial(null);
+    setReconcileStringCode('');
+    setReconcilePosition('');
   }
 
   function handleScanResult(text: string) {
@@ -271,6 +311,10 @@ export default function Replacements() {
     }
   }
 
+  async function updateSm(replacementId: string, patch: { smUploaded?: boolean; sunManagerId?: string }) {
+    await db.replacements.update(replacementId, { ...patch, syncStatus: 'pending' });
+  }
+
   return (
     <div>
       <div className="mb-4 flex items-center justify-between">
@@ -348,6 +392,52 @@ export default function Replacements() {
                   <button onClick={loadPanelByLocation} className="rounded-lg border border-border px-4 py-2 text-sm text-slate-300">
                     Load
                   </button>
+                </div>
+              )}
+
+              {notFoundSerial && (
+                <div className="rounded-lg border border-status-observation/40 bg-status-observation/10 p-3">
+                  <p className="text-sm text-slate-200">
+                    No panel on record with serial <span className="font-mono">{notFoundSerial}</span>.
+                  </p>
+                  <p className="mt-1 text-xs text-slate-400">
+                    This usually means it was already replaced in the field without being logged. Tell me
+                    where it is and I'll register it so the record matches what's really out there.
+                  </p>
+                  {reconcileError && (
+                    <div className="mt-2 rounded-lg bg-status-pending/20 p-2 text-xs text-status-pending">{reconcileError}</div>
+                  )}
+                  <div className="mt-2 flex flex-col gap-2">
+                    <input
+                      value={reconcileStringCode}
+                      onChange={(e) => setReconcileStringCode(e.target.value)}
+                      placeholder="String code, e.g. 31.1.4.2.5"
+                      className="rounded-lg border border-border bg-bg px-3 py-2 text-sm text-slate-100"
+                    />
+                    <input
+                      value={reconcilePosition}
+                      onChange={(e) => setReconcilePosition(e.target.value)}
+                      type="number"
+                      min={1}
+                      max={28}
+                      placeholder="Panel position (1-28)"
+                      className="rounded-lg border border-border bg-bg px-3 py-2 text-sm text-slate-100"
+                    />
+                    <div className="flex gap-2">
+                      <button
+                        onClick={registerFieldDiscrepancy}
+                        className="rounded-lg bg-accent-blue px-4 py-2 text-sm font-semibold text-white"
+                      >
+                        Register what's actually there
+                      </button>
+                      <button
+                        onClick={() => setNotFoundSerial(null)}
+                        className="rounded-lg border border-border px-4 py-2 text-sm text-slate-300"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
                 </div>
               )}
             </div>
@@ -486,7 +576,25 @@ export default function Replacements() {
             <div key={r.replacementId} className="rounded-xl border border-border bg-bg-panel p-3 text-sm">
               <div className="flex items-center justify-between">
                 <span className="font-medium text-slate-100">{r.locationId}</span>
-                <span className="text-xs text-slate-400">{formatDateTime(r.replacementDate)}</span>
+                <div className="flex items-center gap-3">
+                  <span className="text-xs text-slate-400">{formatDateTime(r.replacementDate)}</span>
+                  <label className="flex items-center gap-1 text-xs text-slate-400" onClick={(e) => e.stopPropagation()}>
+                    <input
+                      type="checkbox"
+                      checked={!!r.smUploaded}
+                      onChange={(e) => updateSm(r.replacementId, { smUploaded: e.target.checked })}
+                    />
+                    SM
+                  </label>
+                  <input
+                    value={r.sunManagerId ?? ''}
+                    onChange={(e) => updateSm(r.replacementId, { sunManagerId: e.target.value })}
+                    onClick={(e) => e.stopPropagation()}
+                    placeholder="ID SM"
+                    maxLength={4}
+                    className="w-14 rounded border border-border bg-bg px-1.5 py-0.5 text-center text-xs text-slate-100"
+                  />
+                </div>
               </div>
               <div className="mt-1 font-mono text-xs text-slate-500">
                 {r.removedSerial} → {r.installedSerial}
