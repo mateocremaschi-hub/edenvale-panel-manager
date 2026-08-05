@@ -12,8 +12,10 @@ import Sync from '@/pages/Sync';
 import Settings from '@/pages/Settings';
 import Import from '@/pages/Import';
 import BlockView from '@/pages/BlockView';
+import { useAutoSync } from '@/hooks/useAutoSync';
 
 export default function App() {
+  useAutoSync();
   return (
     <HashRouter>
       <OperatorGate>

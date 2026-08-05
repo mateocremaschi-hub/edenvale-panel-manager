@@ -58,6 +58,29 @@ function fromSupaPanel(r: any): Panel {
   };
 }
 
+/** Upserts a specific set of panels (by id) to Supabase -- used after a report/replacement
+ * changes a panel's status locally, so that change reaches other devices without having to
+ * re-push all 378k panels every time. */
+export async function pushPanelsById(panelIds: string[]): Promise<void> {
+  const supabase = getSupabase();
+  if (!supabase || panelIds.length === 0) return;
+  const panels = (await db.panels.bulkGet(panelIds)).filter((p): p is Panel => !!p);
+  if (panels.length === 0) return;
+  const { error } = await supabase.from('panels').upsert(panels.map(toSupaPanel), { onConflict: 'panel_id' });
+  if (error) throw new Error(`Updating panel status on server failed: ${error.message}`);
+}
+
+/** Downloads a specific set of panels (by id) from Supabase into the local cache -- the
+ * lightweight counterpart to pushPanelsById, used after pulling reports/replacements from
+ * other devices so their panels' current status shows up here too. */
+export async function pullPanelsById(panelIds: string[]): Promise<void> {
+  const supabase = getSupabase();
+  if (!supabase || panelIds.length === 0) return;
+  const { data, error } = await supabase.from('panels').select('*').in('panel_id', panelIds);
+  if (error) throw new Error(`Downloading updated panels failed: ${error.message}`);
+  if (data && data.length > 0) await db.panels.bulkPut(data.map(fromSupaPanel));
+}
+
 export interface SyncProgress {
   phase: string;
   done: number;

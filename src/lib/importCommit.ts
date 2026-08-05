@@ -116,6 +116,6 @@ export async function logImportEvent(operatorId: string, summaryText: string) {
     newValue: summaryText,
     operator: operatorId,
     timestamp: nowIso(),
-    syncStatus: 'local',
+    syncStatus: 'pending',
   });
 }

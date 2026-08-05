@@ -196,7 +196,7 @@ export default function Replacements() {
             blob,
             takenAt: nowIso(),
             author: operatorId!,
-            syncStatus: 'local' as const,
+            syncStatus: 'pending' as const,
           };
         })
       );
@@ -215,7 +215,7 @@ export default function Replacements() {
         reason,
         photoIds: photoRecords.map((p) => p.photoId),
         notes,
-        syncStatus: 'local',
+        syncStatus: 'pending',
       };
       await db.transaction('rw', db.replacements, db.panels, db.issues, db.activityEvents, db.photos, async () => {
         await db.replacements.add(rec);
@@ -242,7 +242,7 @@ export default function Replacements() {
           newValue: serial,
           operator: operatorId!,
           timestamp: nowIso(),
-          syncStatus: 'local',
+          syncStatus: 'pending',
         });
       });
       photos.forEach((p) => URL.revokeObjectURL(p.previewUrl));

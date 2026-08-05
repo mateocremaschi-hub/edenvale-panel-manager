@@ -124,7 +124,7 @@ export default function Reports() {
         monitorOnly,
         immediateSafetyConcern: immediateSafety,
         photoIds: [],
-        syncStatus: 'local',
+        syncStatus: 'pending',
       };
       await db.transaction('rw', db.issues, db.panels, db.activityEvents, async () => {
         await db.issues.add(issue);
@@ -138,7 +138,7 @@ export default function Reports() {
           action: 'issue_created',
           operator: operatorId!,
           timestamp: nowIso(),
-          syncStatus: 'local',
+          syncStatus: 'pending',
         });
       });
       resetForm();
