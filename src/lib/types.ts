@@ -125,7 +125,8 @@ export interface Replacement {
   oldVoltage?: number;
   newVoltage?: number;
   replacementDate: string; // ISO datetime
-  replacedBy: string; // operatorId
+  replacedBy: string; // operatorId (session operator, kept for the audit trail)
+  replacedByName: string; // who the operator said actually did the work, asked every time
   sunManagerId?: string;
   smUploaded?: boolean;
   reason: string;

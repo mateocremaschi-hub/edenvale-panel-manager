@@ -119,6 +119,7 @@ export async function seedFictionalDataIfEmpty() {
       newVoltage: 41.2,
       replacementDate: nowIso(),
       replacedBy: operators[1].operatorId,
+      replacedByName: operators[1].name,
       reason: 'Broken by wind (fictional test record)',
       photoIds: [],
       syncStatus: 'local',

@@ -300,7 +300,7 @@ export async function generateReplacementsPdf(
     if (i > 0) doc.addPage();
 
     const relatedIssue = r.relatedIssueId ? await db.issues.get(r.relatedIssueId) : undefined;
-    await drawDataPage(doc, r, relatedIssue, operatorNameById.get(r.replacedBy) ?? r.replacedBy, pageW);
+    await drawDataPage(doc, r, relatedIssue, r.replacedByName || operatorNameById.get(r.replacedBy) || r.replacedBy, pageW);
 
     const photos = (await db.photos.bulkGet(r.photoIds)).filter((p): p is Photo => !!p);
     await drawPhotoPage(doc, photos, pageW, pageH);

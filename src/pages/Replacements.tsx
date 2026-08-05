@@ -40,6 +40,7 @@ export default function Replacements() {
   const [newSerial, setNewSerial] = useState('');
   const [newVoltage, setNewVoltage] = useState('');
   const [reason, setReason] = useState('');
+  const [replacedByName, setReplacedByName] = useState('');
   const [sunManagerId, setSunManagerId] = useState('');
   const [notes, setNotes] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -84,6 +85,14 @@ export default function Replacements() {
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Default to the session operator's name, but this is asked fresh (and editable) every
+  // time -- whoever is physically doing THIS replacement isn't always whoever picked their
+  // name at login (shared devices, handoffs mid-shift).
+  useEffect(() => {
+    if (current) setReplacedByName(operatorName ?? '');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [current?.panelId]);
 
   const blocks = useMemo(() => {
     const set = new Set((replacements ?? []).map((r) => r.locationId.split('.')[0]));
@@ -225,6 +234,10 @@ export default function Replacements() {
       setError('Enter the new serial number.');
       return;
     }
+    if (!replacedByName.trim()) {
+      setError('Enter who is doing this replacement.');
+      return;
+    }
     // Validation: the new serial cannot already be active at a different location.
     const clash = await db.panels.where('serialNumber').equals(serial).first();
     if (clash && clash.locationId !== current.locationId) {
@@ -267,6 +280,7 @@ export default function Replacements() {
         newVoltage: voltageNum,
         replacementDate: nowIso(),
         replacedBy: operatorId!,
+        replacedByName: replacedByName.trim(),
         sunManagerId: sunManagerId || undefined,
         reason,
         relatedIssueId: current.issueId,
@@ -312,6 +326,7 @@ export default function Replacements() {
       setNewSerial('');
       setNewVoltage('');
       setReason('');
+      setReplacedByName('');
       setSunManagerId('');
       setNotes('');
       setWarning(null);
@@ -511,6 +526,12 @@ export default function Replacements() {
                 placeholder="New voltage (V)"
                 type="number"
                 step="0.01"
+                className="rounded-lg border border-border bg-bg px-3 py-2 text-sm text-slate-100"
+              />
+              <input
+                value={replacedByName}
+                onChange={(e) => setReplacedByName(e.target.value)}
+                placeholder="Replaced by (technician name)"
                 className="rounded-lg border border-border bg-bg px-3 py-2 text-sm text-slate-100"
               />
               <input
@@ -725,7 +746,7 @@ export default function Replacements() {
                   <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-slate-300 sm:grid-cols-3">
                     <div>
                       <span className="text-slate-500">Replaced by</span>
-                      <div>{operatorNameById.get(r.replacedBy) ?? r.replacedBy}</div>
+                      <div>{r.replacedByName || operatorNameById.get(r.replacedBy) || r.replacedBy}</div>
                     </div>
                     <div>
                       <span className="text-slate-500">Old voltage</span>
