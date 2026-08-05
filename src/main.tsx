@@ -17,6 +17,13 @@ function renderLoading(text: string) {
 
 renderLoading('Starting...');
 
+// Ask the browser not to auto-evict this site's storage under pressure (best-effort --
+// not a guarantee against a user-set "clear on close" browser preference, but it removes
+// one real cause of losing offline-created reports/replacements before they get to sync).
+if (navigator.storage?.persist) {
+  navigator.storage.persist().catch(() => {});
+}
+
 initializeData((text) => renderLoading(text))
   .catch((err) => console.error('Init error', err))
   .finally(() => {

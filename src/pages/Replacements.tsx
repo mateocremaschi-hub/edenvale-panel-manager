@@ -22,6 +22,8 @@ export default function Replacements() {
   const { voltageMin, voltageMax } = useSettings();
   const replacements = useLiveQuery(() => db.replacements.orderBy('replacementDate').reverse().toArray(), [], []);
   const allPhotos = useLiveQuery(() => db.photos.where('relatedType').equals('replacement').toArray(), [], []);
+  const operators = useLiveQuery(() => db.operators.toArray(), [], []);
+  const operatorNameById = useMemo(() => new Map((operators ?? []).map((o) => [o.operatorId, o.name])), [operators]);
 
   const photosByReplacement = useMemo(() => {
     const map = new Map<string, Photo[]>();
@@ -195,23 +197,23 @@ export default function Replacements() {
     }
   }
 
-  function addPhotos(files: FileList) {
+  function addPhotos(files: FileList, role: 'before' | 'after') {
     const next: PendingPhoto[] = Array.from(files).map((file) => ({
       file,
       previewUrl: URL.createObjectURL(file),
-      role: 'after' as const,
+      role,
     }));
     setPhotos((p) => [...p, ...next]);
   }
 
-  function togglePhotoRole(index: number) {
-    setPhotos((p) => p.map((ph, i) => (i === index ? { ...ph, role: ph.role === 'before' ? 'after' : 'before' } : ph)));
+  function togglePhotoRole(previewUrl: string) {
+    setPhotos((p) => p.map((ph) => (ph.previewUrl === previewUrl ? { ...ph, role: ph.role === 'before' ? 'after' : 'before' } : ph)));
   }
 
-  function removePhoto(index: number) {
+  function removePhoto(previewUrl: string) {
     setPhotos((p) => {
-      URL.revokeObjectURL(p[index].previewUrl);
-      return p.filter((_, i) => i !== index);
+      URL.revokeObjectURL(previewUrl);
+      return p.filter((ph) => ph.previewUrl !== previewUrl);
     });
   }
 
@@ -532,40 +534,45 @@ export default function Replacements() {
               />
 
               <div>
-                <label className="mb-1 block text-xs text-slate-400">Photos (before/after)</label>
-                <div className="flex flex-wrap gap-2">
-                  {photos.map((p, i) => (
-                    <div key={i} className="flex flex-col items-center gap-1">
-                      <div className="relative h-16 w-16 overflow-hidden rounded-lg border border-border">
-                        <img src={p.previewUrl} className="h-full w-full object-cover" alt="" />
-                        <button
-                          onClick={() => removePhoto(i)}
-                          className="absolute right-0 top-0 rounded-bl bg-black/60 px-1.5 text-xs text-white"
-                        >
-                          ×
-                        </button>
+                <label className="mb-1 block text-xs text-slate-400">Photos</label>
+                <div className="grid grid-cols-2 gap-3">
+                  {(['before', 'after'] as const).map((role) => (
+                    <div key={role}>
+                      <div className="mb-1 text-xs font-semibold text-slate-300">{role === 'before' ? 'Before' : 'After'}</div>
+                      <div className="flex flex-wrap gap-2">
+                        {photos
+                          .filter((p) => p.role === role)
+                          .map((p) => (
+                            <div key={p.previewUrl} className="relative h-16 w-16 overflow-hidden rounded-lg border border-border">
+                              <img src={p.previewUrl} className="h-full w-full object-cover" alt="" />
+                              <button
+                                onClick={() => removePhoto(p.previewUrl)}
+                                className="absolute right-0 top-0 rounded-bl bg-black/60 px-1.5 text-xs text-white"
+                              >
+                                ×
+                              </button>
+                              <button
+                                onClick={() => togglePhotoRole(p.previewUrl)}
+                                className="absolute bottom-0 left-0 right-0 bg-black/60 text-center text-[9px] text-white"
+                              >
+                                Move to {role === 'before' ? 'After' : 'Before'}
+                              </button>
+                            </div>
+                          ))}
+                        <label className="flex h-16 w-16 cursor-pointer items-center justify-center rounded-lg border border-dashed border-border text-2xl text-slate-500">
+                          +
+                          <input
+                            type="file"
+                            accept="image/*"
+                            capture="environment"
+                            multiple
+                            className="hidden"
+                            onChange={(e) => e.target.files && addPhotos(e.target.files, role)}
+                          />
+                        </label>
                       </div>
-                      <button
-                        onClick={() => togglePhotoRole(i)}
-                        className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                          p.role === 'before' ? 'bg-status-pending/30 text-status-pending' : 'bg-status-replaced/30 text-status-replaced'
-                        }`}
-                      >
-                        {p.role === 'before' ? 'Before' : 'After'}
-                      </button>
                     </div>
                   ))}
-                  <label className="flex h-16 w-16 cursor-pointer items-center justify-center rounded-lg border border-dashed border-border text-2xl text-slate-500">
-                    +
-                    <input
-                      type="file"
-                      accept="image/*"
-                      capture="environment"
-                      multiple
-                      className="hidden"
-                      onChange={(e) => e.target.files && addPhotos(e.target.files)}
-                    />
-                  </label>
                 </div>
               </div>
 
@@ -678,9 +685,15 @@ export default function Replacements() {
       <div className="flex flex-col gap-2">
         {filteredReplacements.map((r) => {
           const photosForRow = photosByReplacement.get(r.replacementId) ?? [];
+          const beforePhotos = photosForRow.filter((p) => p.photoRole === 'before');
+          const afterPhotos = photosForRow.filter((p) => p.photoRole !== 'before');
+          const expanded = expandedPhotos === r.replacementId;
           return (
             <div key={r.replacementId} className="rounded-xl border border-border bg-bg-panel p-3 text-sm">
-              <div className="flex items-center justify-between">
+              <button
+                onClick={() => setExpandedPhotos(expanded ? null : r.replacementId)}
+                className="flex w-full items-center justify-between text-left"
+              >
                 <span className="font-medium text-slate-100">{r.locationId}</span>
                 <div className="flex items-center gap-3">
                   <span className="text-xs text-slate-400">{formatDateTime(r.replacementDate)}</span>
@@ -701,29 +714,78 @@ export default function Replacements() {
                     className="w-14 rounded border border-border bg-bg px-1.5 py-0.5 text-center text-xs text-slate-100"
                   />
                 </div>
-              </div>
+              </button>
               <div className="mt-1 font-mono text-xs text-slate-500">
                 {r.removedSerial} → {r.installedSerial}
               </div>
               {r.reason && <div className="mt-1 text-slate-300">{r.reason}</div>}
-              {photosForRow.length > 0 && (
-                <button
-                  onClick={() => setExpandedPhotos(expandedPhotos === r.replacementId ? null : r.replacementId)}
-                  className="mt-1 text-xs text-accent-blue"
-                >
-                  📷 {photosForRow.length} photo{photosForRow.length > 1 ? 's' : ''}
-                </button>
-              )}
-              {expandedPhotos === r.replacementId && (
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {photosForRow.map((p) => (
-                    <img
-                      key={p.photoId}
-                      src={URL.createObjectURL(p.blob)}
-                      className="h-16 w-16 rounded-lg border border-border object-cover"
-                      alt=""
-                    />
-                  ))}
+
+              {expanded && (
+                <div className="mt-3 flex flex-col gap-3 border-t border-border pt-3 text-xs">
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-slate-300 sm:grid-cols-3">
+                    <div>
+                      <span className="text-slate-500">Replaced by</span>
+                      <div>{operatorNameById.get(r.replacedBy) ?? r.replacedBy}</div>
+                    </div>
+                    <div>
+                      <span className="text-slate-500">Old voltage</span>
+                      <div>{r.oldVoltage !== undefined ? `${r.oldVoltage}V` : '-'}</div>
+                    </div>
+                    <div>
+                      <span className="text-slate-500">New voltage</span>
+                      <div>{r.newVoltage !== undefined ? `${r.newVoltage}V` : '-'}</div>
+                    </div>
+                    <div>
+                      <span className="text-slate-500">Removed serial</span>
+                      <div className="font-mono">{r.removedSerial}</div>
+                    </div>
+                    <div>
+                      <span className="text-slate-500">Installed serial</span>
+                      <div className="font-mono">{r.installedSerial}</div>
+                    </div>
+                    <div>
+                      <span className="text-slate-500">SunManager</span>
+                      <div>{r.smUploaded ? 'Uploaded' : 'Not uploaded'}{r.sunManagerId ? ` (${r.sunManagerId})` : ''}</div>
+                    </div>
+                  </div>
+                  {r.notes && (
+                    <div>
+                      <span className="text-slate-500">Notes</span>
+                      <div className="text-slate-300">{r.notes}</div>
+                    </div>
+                  )}
+                  {photosForRow.length > 0 && (
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <div className="mb-1 font-semibold text-slate-400">Before</div>
+                        <div className="flex flex-wrap gap-2">
+                          {beforePhotos.length === 0 && <span className="text-slate-600">None</span>}
+                          {beforePhotos.map((p) => (
+                            <img
+                              key={p.photoId}
+                              src={URL.createObjectURL(p.blob)}
+                              className="h-16 w-16 rounded-lg border border-border object-cover"
+                              alt=""
+                            />
+                          ))}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="mb-1 font-semibold text-slate-400">After</div>
+                        <div className="flex flex-wrap gap-2">
+                          {afterPhotos.length === 0 && <span className="text-slate-600">None</span>}
+                          {afterPhotos.map((p) => (
+                            <img
+                              key={p.photoId}
+                              src={URL.createObjectURL(p.blob)}
+                              className="h-16 w-16 rounded-lg border border-border object-cover"
+                              alt=""
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
