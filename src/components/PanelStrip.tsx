@@ -24,8 +24,10 @@ function panelStatusColor(status: Panel['status']): string {
   }
 }
 
-/** Norte->Sur schematic strip of a string's 28 panels, tappable one by one. Position order
- * comes straight from the imported Excel (locationId's module number), not from any drawing. */
+/** Strip of a string's 28 panels in module order (1 to 28), tappable one by one. Position order
+ * comes straight from the imported Excel (locationId's module number), not from any drawing.
+ * Ends are labelled by position number, not compass direction -- confirmed against the real
+ * farm data that which end is physically North/South varies per string, so we don't guess. */
 export default function PanelStrip({ title, panels }: Props) {
   const navigate = useNavigate();
   const [active, setActive] = useState<Panel | null>(panels[0] ?? null);
@@ -51,7 +53,7 @@ export default function PanelStrip({ title, panels }: Props) {
     <div>
       {title && <div className="mb-1 text-xs text-slate-400">{title}</div>}
       <div className="mb-2 flex items-center gap-2">
-        <span className="text-xs font-semibold text-slate-400">N</span>
+        <span className="text-xs font-semibold text-slate-400">1</span>
         <div className="flex flex-1 gap-0.5">
           {panels.map((p) => {
             const pos = p.locationId.split('.').pop();
@@ -70,7 +72,7 @@ export default function PanelStrip({ title, panels }: Props) {
             );
           })}
         </div>
-        <span className="text-xs font-semibold text-slate-400">S</span>
+        <span className="text-xs font-semibold text-slate-400">28</span>
       </div>
       {active && (
         <div className="flex flex-col gap-2 rounded-lg border border-border px-3 py-2 text-xs">

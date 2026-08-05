@@ -48,6 +48,7 @@ export default function Replacements() {
     serial: string;
     voltage?: number;
     panelId: string;
+    issueId?: string;
   } | null>(null);
 
   const [blockFilter, setBlockFilter] = useState('');
@@ -59,20 +60,22 @@ export default function Replacements() {
   const [searchParams, setSearchParams] = useSearchParams();
   useEffect(() => {
     const panelId = searchParams.get('panelId');
+    const issueId = searchParams.get('issueId') ?? undefined;
     if (!panelId) return;
     db.panels.get(panelId).then((panel) => {
       if (panel) {
         setLocationId(panel.locationId);
-        setCurrent({ locationId: panel.locationId, serial: panel.serialNumber, voltage: panel.voltage, panelId: panel.panelId });
+        setCurrent({ locationId: panel.locationId, serial: panel.serialNumber, voltage: panel.voltage, panelId: panel.panelId, issueId });
         setOpen(true);
       } else {
         setError(`Panel "${panelId}" not found (it may have been removed from the last import).`);
       }
     });
-    // Clear the param so a later manual "New replacement" doesn't reopen this one.
+    // Clear the params so a later manual "New replacement" doesn't reopen this one.
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev);
       next.delete('panelId');
+      next.delete('issueId');
       return next;
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -213,6 +216,7 @@ export default function Replacements() {
         replacedBy: operatorId!,
         sunManagerId: sunManagerId || undefined,
         reason,
+        relatedIssueId: current.issueId,
         photoIds: photoRecords.map((p) => p.photoId),
         notes,
         syncStatus: 'pending',
@@ -225,13 +229,17 @@ export default function Replacements() {
           voltage: voltageNum,
           status: 'replaced',
         });
-        const openIssue = await db.issues
-          .where('locationId')
-          .equals(current.locationId)
-          .filter((i) => i.status !== 'closed')
-          .first();
-        if (openIssue) {
-          await db.issues.update(openIssue.issueId, { status: 'closed' });
+        if (current.issueId) {
+          await db.issues.update(current.issueId, { status: 'replaced' });
+        } else {
+          const openIssue = await db.issues
+            .where('locationId')
+            .equals(current.locationId)
+            .filter((i) => i.status !== 'closed' && i.status !== 'replaced')
+            .first();
+          if (openIssue) {
+            await db.issues.update(openIssue.issueId, { status: 'replaced' });
+          }
         }
         await db.activityEvents.add({
           eventId: newId('evt'),

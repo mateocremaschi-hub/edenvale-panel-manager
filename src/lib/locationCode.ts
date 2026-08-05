@@ -60,14 +60,13 @@ export function buildDcBoxCode(p: LocationCodeParts): string {
 }
 
 /**
- * Placeholder North/South split from the module position alone (1 = North extreme,
- * 28 = South extreme, per spec). This is a simple midpoint heuristic for Etapa 0.
- * The authoritative split -- the Tracker Finder "biggest gap between wings" rule --
- * replaces this once that geometry is linked in Etapa 2.
+ * North/South is NOT reliably derivable from the module number alone -- confirmed against
+ * the real farm data that the module-1-is-North convention does not hold consistently
+ * across every string (it varies). Rather than assert a compass direction we can't actually
+ * know, this always returns 'unknown'. The module number itself (from the Excel) is still
+ * the correct, authoritative position within the string -- only the N/S label was a guess.
  */
-export function orientationFromModule(module: number): 'N' | 'S' | 'unknown' {
-  if (module >= 1 && module <= 14) return 'N';
-  if (module >= 15 && module <= 28) return 'S';
+export function orientationFromModule(_module: number): 'N' | 'S' | 'unknown' {
   return 'unknown';
 }
 

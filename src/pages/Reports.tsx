@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
+import { useNavigate } from 'react-router-dom';
 import { db } from '@/lib/db';
 import { useSession } from '@/store/session';
 import { newId } from '@/lib/id';
@@ -27,8 +28,10 @@ const ISSUE_TYPES: { value: IssueType; label: string }[] = [
 ];
 
 export default function Reports() {
+  const navigate = useNavigate();
   const { operatorId, operatorName } = useSession();
   const issues = useLiveQuery(() => db.issues.orderBy('reportedDate').reverse().toArray(), [], []);
+  const [expandedIssueId, setExpandedIssueId] = useState<string | null>(null);
 
   const [open, setOpen] = useState(false);
   const [scannerOpen, setScannerOpen] = useState(false);
@@ -145,6 +148,46 @@ export default function Reports() {
     } finally {
       setSaving(false);
     }
+  }
+
+  function markAsReplaced(issue: Issue) {
+    navigate(`/replacements?panelId=${encodeURIComponent(issue.panelIdAtReport)}&issueId=${encodeURIComponent(issue.issueId)}`);
+  }
+
+  async function closeIssue(issue: Issue) {
+    await db.transaction('rw', db.issues, db.activityEvents, async () => {
+      await db.issues.update(issue.issueId, { status: 'closed' });
+      await db.activityEvents.add({
+        eventId: newId('evt'),
+        entityType: 'issue',
+        entityId: issue.issueId,
+        action: 'issue_closed',
+        previousValue: issue.status,
+        newValue: 'closed',
+        operator: operatorId!,
+        timestamp: nowIso(),
+        syncStatus: 'pending',
+      });
+    });
+    setExpandedIssueId(null);
+  }
+
+  async function reopenIssue(issue: Issue) {
+    await db.transaction('rw', db.issues, db.activityEvents, async () => {
+      await db.issues.update(issue.issueId, { status: 'reopened' });
+      await db.activityEvents.add({
+        eventId: newId('evt'),
+        entityType: 'issue',
+        entityId: issue.issueId,
+        action: 'issue_reopened',
+        previousValue: issue.status,
+        newValue: 'reopened',
+        operator: operatorId!,
+        timestamp: nowIso(),
+        syncStatus: 'pending',
+      });
+    });
+    setExpandedIssueId(null);
   }
 
   return (
@@ -302,18 +345,52 @@ export default function Reports() {
       )}
 
       <div className="flex flex-col gap-2">
-        {(issues ?? []).map((i) => (
-          <div key={i.issueId} className="rounded-xl border border-border bg-bg-panel p-3">
-            <div className="flex items-center justify-between">
-              <span className="text-sm font-medium text-slate-100">{i.locationId}</span>
-              <span className="text-xs text-slate-400">{formatDateTime(i.reportedDate)}</span>
+        {(issues ?? []).map((i) => {
+          const expanded = expandedIssueId === i.issueId;
+          const isActionable = i.status !== 'replaced' && i.status !== 'closed';
+          return (
+            <div key={i.issueId} className="rounded-xl border border-border bg-bg-panel p-3">
+              <button
+                onClick={() => setExpandedIssueId(expanded ? null : i.issueId)}
+                className="flex w-full items-center justify-between text-left"
+              >
+                <span className="text-sm font-medium text-slate-100">{i.locationId}</span>
+                <span className="text-xs text-slate-400">{formatDateTime(i.reportedDate)}</span>
+              </button>
+              <div className="mt-1 text-xs text-slate-400">
+                {ISSUE_TYPES.find((it) => it.value === i.type)?.label} · {i.severity} · {i.status}
+              </div>
+              {i.description && <div className="mt-1 text-sm text-slate-300">{i.description}</div>}
+              {expanded && (
+                <div className="mt-3 flex flex-wrap gap-2 border-t border-border pt-3">
+                  {isActionable ? (
+                    <>
+                      <button
+                        onClick={() => markAsReplaced(i)}
+                        className="rounded-lg bg-accent-blue px-3 py-2 text-xs font-semibold text-white"
+                      >
+                        🔧 Mark as replaced
+                      </button>
+                      <button
+                        onClick={() => closeIssue(i)}
+                        className="rounded-lg border border-border px-3 py-2 text-xs text-slate-300"
+                      >
+                        Close without replacing
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      onClick={() => reopenIssue(i)}
+                      className="rounded-lg border border-border px-3 py-2 text-xs text-slate-300"
+                    >
+                      Reopen
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
-            <div className="mt-1 text-xs text-slate-400">
-              {ISSUE_TYPES.find((it) => it.value === i.type)?.label} · {i.severity} · {i.status}
-            </div>
-            {i.description && <div className="mt-1 text-sm text-slate-300">{i.description}</div>}
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
