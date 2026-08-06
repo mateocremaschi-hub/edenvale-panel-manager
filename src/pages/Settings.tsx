@@ -67,7 +67,12 @@ export default function Settings() {
 
   return (
     <div className="flex flex-col gap-6 pb-20">
-      <h1 className="text-lg font-semibold text-slate-100">Settings</h1>
+      <div>
+        <h1 className="text-lg font-semibold text-slate-100">Settings</h1>
+        <p className="text-xs text-slate-500">
+          Build: {new Date(__BUILD_TIME__).toLocaleString('en-AU', { dateStyle: 'medium', timeStyle: 'short' })}
+        </p>
+      </div>
 
       <section className="rounded-xl border border-border bg-bg-panel p-4">
         <h2 className="mb-3 text-sm font-semibold text-slate-200">App name</h2>

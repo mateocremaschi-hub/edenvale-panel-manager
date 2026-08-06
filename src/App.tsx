@@ -13,15 +13,25 @@ import Settings from '@/pages/Settings';
 import Import from '@/pages/Import';
 import BlockView from '@/pages/BlockView';
 import { useAutoSync } from '@/hooks/useAutoSync';
+import { useAppUpdate } from '@/hooks/useAppUpdate';
 
 export default function App() {
   useAutoSync();
+  const { needRefresh, applyUpdate } = useAppUpdate();
   return (
     <HashRouter>
       <OperatorGate>
         <div className="flex min-h-screen flex-col md:flex-row">
           <NavBar />
           <div className="flex-1 pb-16 md:pb-0">
+            {needRefresh && (
+              <button
+                onClick={applyUpdate}
+                className="flex w-full items-center justify-center gap-2 bg-accent-blue px-4 py-2 text-sm font-semibold text-white"
+              >
+                🔄 New version available -- tap to update
+              </button>
+            )}
             <StatusBar />
             <main className="p-4">
               <Routes>
