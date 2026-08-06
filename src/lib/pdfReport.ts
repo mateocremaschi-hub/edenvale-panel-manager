@@ -111,19 +111,22 @@ async function drawDataPage(
   const innerW = pageW - MARGIN * 2;
 
   // Header: logo + title, boxed.
-  const headerH = 60;
+  // Header: logo + title, boxed. The logo is a WIDE, SHORT image (roughly 2.1:1) -- height
+  // is what actually limits its size here, not width, so the header box itself needs to be
+  // meaningfully taller to let it grow (a wider max-width alone does nothing for it).
+  const headerH = 90;
   doc.rect(MARGIN, MARGIN, innerW, headerH);
   let logoW = 0;
   try {
     const logo = await loadImage(GRS_LOGO_PNG_BASE64);
-    const fitted = fitImage(logo, 210, headerH - 10);
+    const fitted = fitImage(logo, 240, headerH - 16);
     logoW = fitted.w;
     doc.addImage(GRS_LOGO_PNG_BASE64, 'PNG', MARGIN + 10, MARGIN + (headerH - fitted.h) / 2, fitted.w, fitted.h);
   } catch {
     // logo failed to decode -- proceed without it rather than fail the whole report
   }
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(12);
+  doc.setFontSize(14);
   const titleX = MARGIN + 10 + logoW + 20;
   doc.text(truncateToWidth(doc, 'CORRECTIVE REPORT', innerW - (titleX - MARGIN) - 10), titleX, MARGIN + headerH / 2 + 4);
   doc.setFont('helvetica', 'normal');

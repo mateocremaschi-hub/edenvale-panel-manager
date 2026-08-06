@@ -558,8 +558,19 @@ export default function Replacements() {
                 <label className="mb-1 block text-xs text-slate-400">Photos</label>
                 <div className="grid grid-cols-2 gap-3">
                   {(['before', 'after'] as const).map((role) => (
-                    <div key={role}>
-                      <div className="mb-1 text-xs font-semibold text-slate-300">{role === 'before' ? 'Before' : 'After'}</div>
+                    <div
+                      key={role}
+                      className={`rounded-lg border-2 p-2 ${
+                        role === 'before' ? 'border-status-pending/50 bg-status-pending/5' : 'border-status-replaced/50 bg-status-replaced/5'
+                      }`}
+                    >
+                      <div
+                        className={`mb-1 text-xs font-bold uppercase tracking-wide ${
+                          role === 'before' ? 'text-status-pending' : 'text-status-replaced'
+                        }`}
+                      >
+                        {role === 'before' ? '◀ Before' : 'After ▶'} ({photos.filter((p) => p.role === role).length})
+                      </div>
                       <div className="flex flex-wrap gap-2">
                         {photos
                           .filter((p) => p.role === role)
