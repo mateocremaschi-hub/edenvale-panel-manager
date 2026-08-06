@@ -41,6 +41,29 @@ function shortId(id: string): string {
   return (parts[1] ?? id).slice(0, 8).toUpperCase();
 }
 
+/** Truncates to a single line with an ellipsis if it doesn't fit -- used everywhere text
+ * sits in a fixed-height box, so nothing ever spills past its border. */
+function truncateToWidth(doc: jsPDF, text: string, maxWidth: number): string {
+  if (doc.getTextWidth(text) <= maxWidth) return text;
+  let t = text;
+  while (t.length > 1 && doc.getTextWidth(t + '\u2026') > maxWidth) {
+    t = t.slice(0, -1);
+  }
+  return t + '\u2026';
+}
+
+/** For the multi-line Problem/Solution paragraphs: wraps normally, but if there's more
+ * text than the fixed box height can hold, cuts it off with an ellipsis instead of letting
+ * it run past the border. */
+function fitLinesToHeight(doc: jsPDF, text: string, maxWidth: number, maxHeight: number, lineHeight = 11): string[] {
+  const lines = doc.splitTextToSize(text, maxWidth) as string[];
+  const maxLines = Math.max(1, Math.floor(maxHeight / lineHeight));
+  if (lines.length <= maxLines) return lines;
+  const shown = lines.slice(0, maxLines);
+  shown[maxLines - 1] = truncateToWidth(doc, shown[maxLines - 1].replace(/\s+$/, '') + '\u2026', maxWidth);
+  return shown;
+}
+
 function fmtDate(iso: string): string {
   const d = new Date(iso);
   return d.toLocaleDateString('en-AU', { day: '2-digit', month: '2-digit', year: 'numeric' });
@@ -70,12 +93,12 @@ function labelValue(doc: jsPDF, label: string, value: string, x: number, y: numb
   doc.setTextColor(255, 255, 255);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(9);
-  doc.text(label, x + 4, y + h / 2 + 3);
+  doc.text(truncateToWidth(doc, label, labelW - 6), x + 4, y + h / 2 + 3);
 
   doc.setTextColor(0, 0, 0);
   doc.setFont('helvetica', 'normal');
   doc.rect(x + labelW, y, valueW, h);
-  doc.text(value, x + labelW + 4, y + h / 2 + 3, { maxWidth: valueW - 8 });
+  doc.text(truncateToWidth(doc, value, valueW - 8), x + labelW + 4, y + h / 2 + 3);
 }
 
 async function drawDataPage(
@@ -88,18 +111,21 @@ async function drawDataPage(
   const innerW = pageW - MARGIN * 2;
 
   // Header: logo + title, boxed.
-  const headerH = 46;
+  const headerH = 54;
   doc.rect(MARGIN, MARGIN, innerW, headerH);
+  let logoW = 0;
   try {
     const logo = await loadImage(GRS_LOGO_PNG_BASE64);
-    const fitted = fitImage(logo, 110, headerH - 14);
-    doc.addImage(GRS_LOGO_PNG_BASE64, 'PNG', MARGIN + 8, MARGIN + (headerH - fitted.h) / 2, fitted.w, fitted.h);
+    const fitted = fitImage(logo, 170, headerH - 12);
+    logoW = fitted.w;
+    doc.addImage(GRS_LOGO_PNG_BASE64, 'PNG', MARGIN + 10, MARGIN + (headerH - fitted.h) / 2, fitted.w, fitted.h);
   } catch {
     // logo failed to decode -- proceed without it rather than fail the whole report
   }
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(12);
-  doc.text('CORRECTIVE REPORT', MARGIN + 160, MARGIN + headerH / 2 + 4);
+  const titleX = MARGIN + 10 + logoW + 20;
+  doc.text(truncateToWidth(doc, 'CORRECTIVE REPORT', innerW - (titleX - MARGIN) - 10), titleX, MARGIN + headerH / 2 + 4);
   doc.setFont('helvetica', 'normal');
 
   let y = MARGIN + headerH + 8;
@@ -142,7 +168,7 @@ async function drawDataPage(
     ? `${relatedIssue.type.replace(/_/g, ' ')}${relatedIssue.description ? ' -- ' + relatedIssue.description : ''}`
     : 'No linked report -- registered directly as a replacement.';
   doc.setFontSize(9);
-  doc.text(doc.splitTextToSize(problemText, innerW - 10), MARGIN + 5, y + 12);
+  doc.text(fitLinesToHeight(doc, problemText, innerW - 10, problemH - 10), MARGIN + 5, y + 12);
   y += problemH + 10;
 
   // Solution.
@@ -151,7 +177,7 @@ async function drawDataPage(
   const solutionH = 60;
   doc.rect(MARGIN, y, innerW, solutionH);
   const solutionText = [r.reason, r.notes].filter(Boolean).join('\n') || '-';
-  doc.text(doc.splitTextToSize(solutionText, innerW - 10), MARGIN + 5, y + 12);
+  doc.text(fitLinesToHeight(doc, solutionText, innerW - 10, solutionH - 10), MARGIN + 5, y + 12);
   y += solutionH + 10;
 
   // Works table.
@@ -176,7 +202,7 @@ async function drawDataPage(
   cx = MARGIN;
   for (let i = 0; i < workValues.length; i++) {
     doc.rect(cx, y, workCols[i], workRowH);
-    doc.text(String(workValues[i]), cx + 3, y + 12, { maxWidth: workCols[i] - 6 });
+    doc.text(truncateToWidth(doc, String(workValues[i]), workCols[i] - 6), cx + 3, y + 12);
     cx += workCols[i];
   }
   y += workRowH;
@@ -205,7 +231,7 @@ async function drawDataPage(
   cx = MARGIN;
   for (let i = 0; i < partValues.length; i++) {
     doc.rect(cx, y, partCols[i], workRowH);
-    doc.text(String(partValues[i]), cx + 3, y + 12, { maxWidth: partCols[i] - 6 });
+    doc.text(truncateToWidth(doc, String(partValues[i]), partCols[i] - 6), cx + 3, y + 12);
     cx += partCols[i];
   }
   y += workRowH;
