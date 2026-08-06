@@ -5,10 +5,10 @@ import { t } from '@/i18n';
 const items = [
   { to: '/', label: t('nav_dashboard'), icon: LayoutDashboard },
   { to: '/map', label: t('nav_map'), icon: Map },
-  { to: '/search', label: t('nav_search'), icon: Search },
   { to: '/replacements', label: t('nav_replacements'), icon: Replace },
   { to: '/reports', label: t('nav_reports'), icon: FileWarning },
   { to: '/records', label: t('nav_records'), icon: Table2 },
+  { to: '/search', label: t('nav_search'), icon: Search },
   { to: '/sync', label: t('nav_sync'), icon: RefreshCw },
   { to: '/settings', label: t('nav_settings'), icon: Settings },
 ];
