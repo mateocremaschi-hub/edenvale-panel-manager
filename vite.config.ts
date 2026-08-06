@@ -8,10 +8,14 @@ import { fileURLToPath } from 'node:url';
 // TS type errors -- only on syntax errors / broken imports. This mirrors the
 // edenvale-vegetation-control setup on purpose (see that app's hard-won notes).
 export default defineConfig({
+  define: {
+    __BUILD_TIME__: JSON.stringify(new Date().toISOString()),
+  },
   plugins: [
     react(),
     VitePWA({
-      registerType: 'autoUpdate',
+      registerType: 'prompt',
+      injectRegister: null,
       includeAssets: ['favicon.svg'],
       manifest: {
         name: 'Edenvale Panel Manager',

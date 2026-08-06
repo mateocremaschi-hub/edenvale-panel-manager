@@ -70,7 +70,10 @@ export default function Settings() {
       <div>
         <h1 className="text-lg font-semibold text-slate-100">Settings</h1>
         <p className="text-xs text-slate-500">
-          Build: {new Date(__BUILD_TIME__).toLocaleString('en-AU', { dateStyle: 'medium', timeStyle: 'short' })}
+          Build:{' '}
+          {typeof __BUILD_TIME__ !== 'undefined' && __BUILD_TIME__
+            ? new Date(__BUILD_TIME__).toLocaleString('en-AU', { dateStyle: 'medium', timeStyle: 'short' })
+            : 'unknown (vite.config.ts wasn\'t updated in this deploy)'}
         </p>
       </div>
 
