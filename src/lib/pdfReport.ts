@@ -111,12 +111,12 @@ async function drawDataPage(
   const innerW = pageW - MARGIN * 2;
 
   // Header: logo + title, boxed.
-  const headerH = 54;
+  const headerH = 60;
   doc.rect(MARGIN, MARGIN, innerW, headerH);
   let logoW = 0;
   try {
     const logo = await loadImage(GRS_LOGO_PNG_BASE64);
-    const fitted = fitImage(logo, 170, headerH - 12);
+    const fitted = fitImage(logo, 210, headerH - 10);
     logoW = fitted.w;
     doc.addImage(GRS_LOGO_PNG_BASE64, 'PNG', MARGIN + 10, MARGIN + (headerH - fitted.h) / 2, fitted.w, fitted.h);
   } catch {
@@ -148,7 +148,7 @@ async function drawDataPage(
       'Technician:',
       operatorName,
       'Parts:',
-      r.installedSerial,
+      'PV Panel',
     ],
   ];
   for (const row of rows) {
@@ -226,16 +226,21 @@ async function drawDataPage(
   }
   doc.setFont('helvetica', 'normal');
   y += 16;
-  const voltageNote = r.newVoltage !== undefined ? ` (${r.newVoltage}V)` : '';
-  const partValues = [r.installedSerial, `PV Panel${voltageNote}`, '1', fmtDate(r.replacementDate)];
-  cx = MARGIN;
-  for (let i = 0; i < partValues.length; i++) {
-    doc.rect(cx, y, partCols[i], workRowH);
-    doc.text(truncateToWidth(doc, String(partValues[i]), partCols[i] - 6), cx + 3, y + 12);
-    cx += partCols[i];
+  const oldVoltageNote = r.oldVoltage !== undefined ? ` (${r.oldVoltage}V)` : '';
+  const newVoltageNote = r.newVoltage !== undefined ? ` (${r.newVoltage}V)` : '';
+  const partRows = [
+    [r.removedSerial, `PV Panel -- Removed${oldVoltageNote}`, '1', fmtDate(r.replacementDate)],
+    [r.installedSerial, `PV Panel -- Installed${newVoltageNote}`, '1', fmtDate(r.replacementDate)],
+  ];
+  for (const rowVals of partRows) {
+    cx = MARGIN;
+    for (let i = 0; i < rowVals.length; i++) {
+      doc.rect(cx, y, partCols[i], workRowH);
+      doc.text(truncateToWidth(doc, String(rowVals[i]), partCols[i] - 6), cx + 3, y + 12);
+      cx += partCols[i];
+    }
+    y += workRowH;
   }
-  y += workRowH;
-  doc.rect(MARGIN, y, innerW, workRowH);
 }
 
 async function drawPhotoPage(doc: jsPDF, photos: Photo[], pageW: number, pageH: number) {
