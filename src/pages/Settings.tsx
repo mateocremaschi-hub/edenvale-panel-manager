@@ -3,13 +3,16 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { Link } from 'react-router-dom';
 import { db, clearPanelData, setDataSource } from '@/lib/db';
 import { useSettings } from '@/store/settings';
+import { useSession } from '@/store/session';
 import { newId } from '@/lib/id';
 import { hasSupabase } from '@/lib/supabase';
 import { pushLocationsAndPanels, type SyncProgress } from '@/lib/sync';
+import { parseHistoricalReplacementsFile, applyHistoricalReplacements, type HistoricalApplyResult } from '@/lib/historicalReplacements';
 
 export default function Settings() {
   const operators = useLiveQuery(() => db.operators.toArray(), [], []);
   const { appName, setAppName, adminPin, setAdminPin, voltageMin, voltageMax, setVoltageRange } = useSettings();
+  const { operatorId } = useSession();
 
   const [name, setName] = useState(appName);
   const [newOperator, setNewOperator] = useState('');
@@ -18,6 +21,33 @@ export default function Settings() {
   const [vMax, setVMax] = useState(String(voltageMax));
   const [pushProgress, setPushProgress] = useState<SyncProgress | null>(null);
   const [pushError, setPushError] = useState<string | null>(null);
+  const [histBusy, setHistBusy] = useState(false);
+  const [histProgress, setHistProgress] = useState<{ done: number; total: number } | null>(null);
+  const [histResult, setHistResult] = useState<HistoricalApplyResult | null>(null);
+  const [histError, setHistError] = useState<string | null>(null);
+
+  async function handleHistoricalFile(file: File) {
+    setHistError(null);
+    setHistResult(null);
+    setHistBusy(true);
+    try {
+      const rows = await parseHistoricalReplacementsFile(file);
+      const confirmed = confirm(
+        `Found ${rows.length} row(s) in this file. This will check each "before" serial against your current panels, and for every match, log a replacement and update that panel's serial to "after". Continue?`
+      );
+      if (!confirmed) {
+        setHistBusy(false);
+        return;
+      }
+      const result = await applyHistoricalReplacements(rows, operatorId!, (done, total) => setHistProgress({ done, total }));
+      setHistResult(result);
+    } catch (err) {
+      setHistError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setHistBusy(false);
+      setHistProgress(null);
+    }
+  }
   const [pushDone, setPushDone] = useState(false);
 
   async function handlePush() {
@@ -210,6 +240,51 @@ export default function Settings() {
               </button>
             )}
           </>
+        )}
+      </section>
+
+      <section className="rounded-xl border border-border bg-bg-panel p-4">
+        <h2 className="mb-3 text-sm font-semibold text-slate-200">Apply historical replacements from Excel</h2>
+        <p className="mb-3 text-xs text-slate-500">
+          For panels that were swapped in the field before this app existed (or without being logged).
+          Upload a file with "Serial Number (Before)" / "Serial Number (After)" columns -- for every
+          "before" serial that matches a current panel, this logs a replacement and updates that panel
+          to the "after" serial. Serials that don't match anything current are left alone and listed
+          below so you can check them.
+        </p>
+        {histError && <div className="mb-3 rounded-lg bg-status-pending/20 p-2 text-xs text-status-pending">{histError}</div>}
+        {histResult && (
+          <div className="mb-3 flex flex-col gap-2 rounded-lg border border-border p-3 text-xs">
+            <div className="text-status-replaced">✓ {histResult.matched} replacement(s) logged and applied.</div>
+            {histResult.alreadyCurrent.length > 0 && (
+              <div className="text-slate-400">{histResult.alreadyCurrent.length} row(s) already matched (no change needed).</div>
+            )}
+            {histResult.notFound.length > 0 && (
+              <details>
+                <summary className="cursor-pointer text-status-pending">
+                  {histResult.notFound.length} "before" serial(s) not found among current panels
+                </summary>
+                <div className="mt-1 max-h-40 overflow-y-auto font-mono text-slate-400">
+                  {histResult.notFound.join(', ')}
+                </div>
+              </details>
+            )}
+          </div>
+        )}
+        {histBusy ? (
+          <p className="text-xs text-slate-400">
+            {histProgress ? `Processing ${histProgress.done} / ${histProgress.total}...` : 'Reading file...'}
+          </p>
+        ) : (
+          <label className="inline-block cursor-pointer rounded-lg bg-accent-blue px-4 py-2 text-sm font-semibold text-white">
+            Choose Excel file
+            <input
+              type="file"
+              accept=".xlsx,.xls"
+              className="hidden"
+              onChange={(e) => e.target.files?.[0] && handleHistoricalFile(e.target.files[0])}
+            />
+          </label>
         )}
       </section>
 
