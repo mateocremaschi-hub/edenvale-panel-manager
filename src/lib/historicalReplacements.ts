@@ -2,7 +2,50 @@ import * as XLSX from 'xlsx';
 import { db } from './db';
 import { newId } from './id';
 import { nowIso } from './time';
-import type { Replacement, ActivityEvent } from './types';
+import { getSupabase } from './supabase';
+import type { ActivityEvent } from './types';
+
+const HISTORICAL_MARKER = 'Historical import -- original technician not recorded';
+
+export interface HistoricalCleanupResult {
+  removedLocally: number;
+  removedRemotely: number;
+}
+
+/**
+ * Removes every Replacement (and its activity event) created by applyHistoricalReplacements,
+ * identified by the fixed `replacedByName` marker -- WITHOUT touching the panel serial numbers
+ * those runs already corrected. Use this if the historical import was run in "log as a visible
+ * replacement" mode and the user decides afterwards they only wanted the silent data fix.
+ */
+export async function removeHistoricalReplacementRecords(onProgress?: (text: string) => void): Promise<HistoricalCleanupResult> {
+  onProgress?.('Finding historical import records...');
+  const toRemove = await db.replacements.filter((r) => r.replacedByName === HISTORICAL_MARKER).toArray();
+  const ids = toRemove.map((r) => r.replacementId);
+
+  if (ids.length > 0) {
+    onProgress?.(`Removing ${ids.length} record(s) locally...`);
+    await db.replacements.bulkDelete(ids);
+    const events = await db.activityEvents.where('entityType').equals('replacement').and((e) => ids.includes(e.entityId)).toArray();
+    await db.activityEvents.bulkDelete(events.map((e) => e.eventId));
+  }
+
+  let removedRemotely = 0;
+  const supabase = getSupabase();
+  if (supabase && ids.length > 0) {
+    onProgress?.('Removing from the shared server...');
+    const { error: e1, count } = await supabase
+      .from('replacements')
+      .delete({ count: 'exact' })
+      .eq('replaced_by_name', HISTORICAL_MARKER);
+    if (e1) throw new Error(`Removing from server failed: ${e1.message}`);
+    removedRemotely = count ?? 0;
+    const { error: e2 } = await supabase.from('activity_events').delete().eq('action', 'historical_replacement_imported');
+    if (e2) throw new Error(`Removing activity history from server failed: ${e2.message}`);
+  }
+
+  return { removedLocally: ids.length, removedRemotely };
+}
 
 export interface HistoricalRow {
   before: string;
@@ -53,12 +96,15 @@ export async function parseHistoricalReplacementsFile(file: File): Promise<Histo
 }
 
 /**
- * For each row, looks up the "before" serial among CURRENT panels. If found, records a proper
- * Replacement (so it shows up in reports/history like any other, honestly flagged as a
- * historical import since the real date/technician aren't known) and updates that panel's
- * serial to "after". Rows whose "before" serial isn't found as a current panel are left alone
- * and reported back -- that panel may already have been replaced again since, or the serial may
- * not exist in this farm's data at all; both are worth a human look, not a silent skip.
+ * For each row, looks up the "before" serial among CURRENT panels. If found, updates that
+ * panel's serial straight to "after" and logs a lightweight activity event for the audit
+ * trail -- deliberately NOT a Replacement record, so this doesn't show up in the Replacements
+ * list, the Corrective Report PDF, or the Dashboard's replacement counts. This is a silent data
+ * correction (the panel was swapped in the field before this app existed, or without being
+ * logged) -- not a new field event happening today. Rows whose "before" serial isn't found as
+ * a current panel are left alone and reported back -- that panel may already have been
+ * replaced again since, or the serial may not exist in this farm's data at all; both are worth
+ * a human look, not a silent skip.
  */
 export async function applyHistoricalReplacements(
   rows: HistoricalRow[],
@@ -66,7 +112,6 @@ export async function applyHistoricalReplacements(
   onProgress?: (done: number, total: number) => void
 ): Promise<HistoricalApplyResult> {
   const result: HistoricalApplyResult = { matched: 0, notFound: [], alreadyCurrent: [] };
-  const importNote = `Historical replacement imported from Excel on ${nowIso().slice(0, 10)} -- original replacement date and technician were not recorded.`;
 
   for (let i = 0; i < rows.length; i++) {
     const { before, after, moduleType } = rows[i];
@@ -82,37 +127,21 @@ export async function applyHistoricalReplacements(
       continue;
     }
 
-    const replacementId = newId('repl');
-    const rec: Replacement = {
-      replacementId,
-      locationId: panel.locationId,
-      removedPanelId: panel.panelId,
-      removedSerial: before,
-      installedPanelId: panel.panelId,
-      installedSerial: after,
-      oldVoltage: panel.voltage,
-      replacementDate: nowIso(),
-      replacedBy: operatorId,
-      replacedByName: 'Historical import -- original technician not recorded',
-      reason: 'Panel found already replaced in the field; not previously logged.',
-      photoIds: [],
-      notes: [importNote, moduleType ? `Module type: ${moduleType}` : null].filter(Boolean).join(' '),
-      syncStatus: 'pending',
-    };
-
     const event: ActivityEvent = {
       eventId: newId('evt'),
-      entityType: 'replacement',
-      entityId: replacementId,
-      action: 'historical_replacement_imported',
+      entityType: 'panel',
+      entityId: panel.panelId,
+      action: 'historical_serial_correction',
+      previousValue: before,
+      newValue: after,
       operator: operatorId,
       timestamp: nowIso(),
       syncStatus: 'pending',
+      correctionReason: moduleType ? `Module type: ${moduleType}` : undefined,
     };
 
-    await db.transaction('rw', db.replacements, db.panels, db.activityEvents, async () => {
-      await db.replacements.add(rec);
-      await db.panels.update(panel.panelId, { serialNumber: after, status: 'replaced' });
+    await db.transaction('rw', db.panels, db.activityEvents, async () => {
+      await db.panels.update(panel.panelId, { serialNumber: after });
       await db.activityEvents.add(event);
     });
     result.matched++;

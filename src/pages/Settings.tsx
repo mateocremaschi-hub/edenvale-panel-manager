@@ -7,7 +7,7 @@ import { useSession } from '@/store/session';
 import { newId } from '@/lib/id';
 import { hasSupabase } from '@/lib/supabase';
 import { pushLocationsAndPanels, type SyncProgress } from '@/lib/sync';
-import { parseHistoricalReplacementsFile, applyHistoricalReplacements, type HistoricalApplyResult } from '@/lib/historicalReplacements';
+import { parseHistoricalReplacementsFile, applyHistoricalReplacements, removeHistoricalReplacementRecords, type HistoricalApplyResult, type HistoricalCleanupResult } from '@/lib/historicalReplacements';
 
 export default function Settings() {
   const operators = useLiveQuery(() => db.operators.toArray(), [], []);
@@ -25,6 +25,29 @@ export default function Settings() {
   const [histProgress, setHistProgress] = useState<{ done: number; total: number } | null>(null);
   const [histResult, setHistResult] = useState<HistoricalApplyResult | null>(null);
   const [histError, setHistError] = useState<string | null>(null);
+  const [cleanupBusy, setCleanupBusy] = useState(false);
+  const [cleanupStatus, setCleanupStatus] = useState<string | null>(null);
+  const [cleanupResult, setCleanupResult] = useState<HistoricalCleanupResult | null>(null);
+  const [cleanupError, setCleanupError] = useState<string | null>(null);
+
+  async function handleCleanup() {
+    setCleanupError(null);
+    setCleanupResult(null);
+    const confirmed = confirm(
+      'This removes every replacement record created by an earlier run of "Apply historical replacements" (both on this device and on the shared server), WITHOUT touching the panel serial numbers those runs already corrected. Continue?'
+    );
+    if (!confirmed) return;
+    setCleanupBusy(true);
+    try {
+      const result = await removeHistoricalReplacementRecords(setCleanupStatus);
+      setCleanupResult(result);
+    } catch (err) {
+      setCleanupError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setCleanupBusy(false);
+      setCleanupStatus(null);
+    }
+  }
 
   async function handleHistoricalFile(file: File) {
     setHistError(null);
@@ -248,14 +271,15 @@ export default function Settings() {
         <p className="mb-3 text-xs text-slate-500">
           For panels that were swapped in the field before this app existed (or without being logged).
           Upload a file with "Serial Number (Before)" / "Serial Number (After)" columns -- for every
-          "before" serial that matches a current panel, this logs a replacement and updates that panel
-          to the "after" serial. Serials that don't match anything current are left alone and listed
-          below so you can check them.
+          "before" serial that matches a current panel, this quietly updates that panel to the "after"
+          serial. This is a silent data correction: it does NOT create a visible replacement entry, and
+          won't show up in the Replacements list, the PDF report, or the Dashboard's replacement counts.
+          Serials that don't match anything current are left alone and listed below so you can check them.
         </p>
         {histError && <div className="mb-3 rounded-lg bg-status-pending/20 p-2 text-xs text-status-pending">{histError}</div>}
         {histResult && (
           <div className="mb-3 flex flex-col gap-2 rounded-lg border border-border p-3 text-xs">
-            <div className="text-status-replaced">✓ {histResult.matched} replacement(s) logged and applied.</div>
+            <div className="text-status-replaced">✓ {histResult.matched} panel(s) updated.</div>
             {histResult.alreadyCurrent.length > 0 && (
               <div className="text-slate-400">{histResult.alreadyCurrent.length} row(s) already matched (no change needed).</div>
             )}
@@ -286,6 +310,26 @@ export default function Settings() {
             />
           </label>
         )}
+
+        <div className="mt-4 border-t border-border pt-3">
+          <p className="mb-2 text-xs text-slate-500">
+            Ran an earlier version of this tool that logged visible replacement entries instead of a
+            silent update? Remove those entries here -- panel serials already corrected are left as-is.
+          </p>
+          {cleanupError && <div className="mb-2 rounded-lg bg-status-pending/20 p-2 text-xs text-status-pending">{cleanupError}</div>}
+          {cleanupResult && (
+            <div className="mb-2 text-xs text-status-replaced">
+              ✓ Removed {cleanupResult.removedLocally} record(s) locally, {cleanupResult.removedRemotely} on the server.
+            </div>
+          )}
+          {cleanupBusy ? (
+            <p className="text-xs text-slate-400">{cleanupStatus || 'Working...'}</p>
+          ) : (
+            <button onClick={handleCleanup} className="rounded-lg border border-status-pending px-4 py-2 text-sm font-semibold text-status-pending">
+              Remove historical import replacement entries
+            </button>
+          )}
+        </div>
       </section>
 
       <section className="rounded-xl border border-status-pending/40 bg-bg-panel p-4">

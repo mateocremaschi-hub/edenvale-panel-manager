@@ -145,6 +145,22 @@ function photoToRow(p: Photo) {
   };
 }
 
+/** After a full-table pull, removes local 'synced' records whose id is no longer present on the
+ * server -- a plain pull only ever adds/updates, so a server-side delete (e.g. the historical-
+ * import cleanup tool) would otherwise leave stale copies sitting in local devices forever.
+ * Never touches 'pending' records (not yet pushed) or 'local' ones (fictional/seed data, never
+ * meant to sync) -- only things this device already believes are in sync with the server. */
+async function deleteLocallyIfGoneRemotely<T extends Record<string, unknown>>(
+  table: { where(index: string): { equals(v: string): { toArray(): Promise<T[]> } }; bulkDelete(keys: string[]): Promise<void> },
+  idField: string,
+  remoteIds: string[]
+): Promise<void> {
+  const remoteSet = new Set(remoteIds);
+  const localSynced = await table.where('syncStatus').equals('synced').toArray();
+  const staleKeys = localSynced.filter((r) => !remoteSet.has(r[idField] as string)).map((r) => r[idField] as string);
+  if (staleKeys.length > 0) await table.bulkDelete(staleKeys);
+}
+
 export interface OutboxSummary {
   pushedIssues: number;
   pushedReplacements: number;
@@ -223,11 +239,13 @@ export async function pullOperationalRecords(onStatus?: (text: string) => void):
   const { data: issueRows, error: issueErr } = await supabase.from('issues').select('*');
   if (issueErr) throw new Error(`Downloading reports failed: ${issueErr.message}`);
   if (issueRows && issueRows.length > 0) await db.issues.bulkPut(issueRows.map(rowToIssue));
+  await deleteLocallyIfGoneRemotely(db.issues, 'issueId', (issueRows ?? []).map((r) => r.issue_id));
 
   onStatus?.('Downloading replacements...');
   const { data: replRows, error: replErr } = await supabase.from('replacements').select('*');
   if (replErr) throw new Error(`Downloading replacements failed: ${replErr.message}`);
   if (replRows && replRows.length > 0) await db.replacements.bulkPut(replRows.map(rowToReplacement));
+  await deleteLocallyIfGoneRemotely(db.replacements, 'replacementId', (replRows ?? []).map((r) => r.replacement_id));
 
   const touchedPanelIds = [
     ...new Set<string>([...(issueRows ?? []).map((r) => r.panel_id_at_report), ...(replRows ?? []).map((r) => r.installed_panel_id)]),
@@ -241,10 +259,12 @@ export async function pullOperationalRecords(onStatus?: (text: string) => void):
   const { data: eventRows, error: eventErr } = await supabase.from('activity_events').select('*');
   if (eventErr) throw new Error(`Downloading activity history failed: ${eventErr.message}`);
   if (eventRows && eventRows.length > 0) await db.activityEvents.bulkPut(eventRows.map(rowToEvent));
+  await deleteLocallyIfGoneRemotely(db.activityEvents, 'eventId', (eventRows ?? []).map((r) => r.event_id));
 
   onStatus?.('Downloading photos...');
   const { data: photoRows, error: photoErr } = await supabase.from('photos').select('*');
   if (photoErr) throw new Error(`Downloading photo list failed: ${photoErr.message}`);
+  await deleteLocallyIfGoneRemotely(db.photos, 'photoId', (photoRows ?? []).map((r) => r.photo_id));
   let pulledPhotos = 0;
   for (const row of photoRows ?? []) {
     const existing = await db.photos.get(row.photo_id);
