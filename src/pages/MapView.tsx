@@ -25,7 +25,7 @@ export default function MapView() {
       const p = panelsByLocation.get(l.locationId);
       if (!p) continue;
       if (p.status === 'issue_reported' || p.status === 'under_assessment' || p.status === 'monitoring') issue++;
-      if (p.status === 'pending_replacement') pending++;
+      if (p.status === 'pending_replacement' || p.status === 'vacant') pending++;
       if (p.status === 'replaced') replaced++;
     }
     return { total: locs.length, issue, pending, replaced };

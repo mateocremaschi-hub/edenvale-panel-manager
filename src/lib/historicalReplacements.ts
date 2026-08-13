@@ -55,8 +55,20 @@ export interface HistoricalRow {
 
 export interface HistoricalApplyResult {
   matched: number;
+  vacated: number; // "after" wasn't a real serial -- panel marked vacant instead
   notFound: string[]; // "before" serials that don't exist as a current panel
   alreadyCurrent: string[]; // "before" serial IS a panel, but its serial already equals "after" (re-run, no-op)
+}
+
+/** Real serials in this farm's data are long digit-only strings (e.g. "821051140249164146").
+ * Anything else in the "after" column -- "To be installed", blank, "TBD", etc -- means the
+ * panel was physically removed (e.g. relocated from a stopped tracker to a working one) and
+ * nothing has been installed in its place yet, NOT a literal new serial number. Never write
+ * that text into serialNumber: it isn't unique (many vacant slots could carry the exact same
+ * placeholder text), which breaks the assumption that a serial identifies one panel and risks
+ * false collisions in search/lookup. */
+function looksLikeRealSerial(value: string): boolean {
+  return /^\d{10,20}$/.test(value.trim());
 }
 
 /** Reads the "Serial Number (Before)" / "Serial Number (After)" / "Type of module" columns from
@@ -111,7 +123,7 @@ export async function applyHistoricalReplacements(
   operatorId: string,
   onProgress?: (done: number, total: number) => void
 ): Promise<HistoricalApplyResult> {
-  const result: HistoricalApplyResult = { matched: 0, notFound: [], alreadyCurrent: [] };
+  const result: HistoricalApplyResult = { matched: 0, vacated: 0, notFound: [], alreadyCurrent: [] };
 
   for (let i = 0; i < rows.length; i++) {
     const { before, after, moduleType } = rows[i];
@@ -127,25 +139,55 @@ export async function applyHistoricalReplacements(
       continue;
     }
 
+    const isVacating = !looksLikeRealSerial(after);
+    const newSerial = isVacating ? `VACANT-${panel.locationId}` : after;
+
     const event: ActivityEvent = {
       eventId: newId('evt'),
       entityType: 'panel',
       entityId: panel.panelId,
-      action: 'historical_serial_correction',
+      action: isVacating ? 'historical_panel_vacated' : 'historical_serial_correction',
       previousValue: before,
       newValue: after,
       operator: operatorId,
       timestamp: nowIso(),
       syncStatus: 'pending',
-      correctionReason: moduleType ? `Module type: ${moduleType}` : undefined,
+      correctionReason: [moduleType ? `Module type: ${moduleType}` : null, isVacating ? `Spreadsheet said "${after}" -- treated as vacant, not a real serial.` : null]
+        .filter(Boolean)
+        .join(' '),
     };
 
     await db.transaction('rw', db.panels, db.activityEvents, async () => {
-      await db.panels.update(panel.panelId, { serialNumber: after });
+      await db.panels.update(panel.panelId, { serialNumber: newSerial, status: isVacating ? 'vacant' : panel.status });
       await db.activityEvents.add(event);
     });
-    result.matched++;
+    if (isVacating) result.vacated++;
+    else result.matched++;
   }
 
   return result;
+}
+
+export interface SuspectSerial {
+  locationId: string;
+  serialNumber: string;
+}
+
+/** Scans every panel for a serial that doesn't look like a real one (see looksLikeRealSerial)
+ * and isn't already a properly-marked vacant slot ("VACANT-..."). Catches leftover bad values
+ * from before this tool knew to handle non-serial "after" values specially -- e.g. a literal
+ * "To be installed" written straight into serialNumber by an earlier run, or anything similar
+ * already sitting in the original farm import. Doesn't fix anything, just reports so a human
+ * can decide what each one should actually be. */
+export async function findSuspectSerials(onProgress?: (scanned: number, total: number) => void): Promise<SuspectSerial[]> {
+  const all = await db.panels.toArray();
+  const suspects: SuspectSerial[] = [];
+  for (let i = 0; i < all.length; i++) {
+    const p = all[i];
+    if (i % 5000 === 0) onProgress?.(i, all.length);
+    if (p.serialNumber.startsWith('VACANT-')) continue; // already properly marked, not a problem
+    if (!looksLikeRealSerial(p.serialNumber)) suspects.push({ locationId: p.locationId, serialNumber: p.serialNumber });
+  }
+  onProgress?.(all.length, all.length);
+  return suspects;
 }

@@ -14,13 +14,14 @@ export interface CommitStats {
   created: number;
   updatedMasterData: number;
   unchanged: number;
-  serialMismatch: number; // Excel serial differs from what's recorded -- flagged, NOT auto-applied
+  serialMismatch: number; // Excel serial differs from what's recorded -- flagged, NOT auto-applied (unless force)
+  restored: number; // force mode only: mismatch found, and serial/status were forced back to the Excel's values
   skipped: number; // rows with status 'error'
   mismatches: { locationId: string; recordedSerial: string; excelSerial: string }[];
 }
 
 export function newCommitStats(): CommitStats {
-  return { created: 0, updatedMasterData: 0, unchanged: 0, serialMismatch: 0, skipped: 0, mismatches: [] };
+  return { created: 0, updatedMasterData: 0, unchanged: 0, serialMismatch: 0, restored: 0, skipped: 0, mismatches: [] };
 }
 
 /**
@@ -31,11 +32,18 @@ export function newCommitStats(): CommitStats {
  * from what's already recorded at that location, the row is flagged as a mismatch and left
  * untouched -- changing a serial goes through the Replacements flow so it keeps a proper
  * audit trail, never through a bulk import.
+ *
+ * `force: true` (used only by the dedicated "restore from master Excel" recovery tool, never
+ * by the normal import wizard) skips that protection instead: the serial AND status are
+ * overwritten straight from the Excel, discarding whatever a later historical-import Excel
+ * put there. It never touches issues, replacements, photos, or activity events -- only the
+ * panels/locations tables -- so real field work recorded through the app is never at risk.
  */
 export async function commitBatch(
   batch: ImportRow[],
   existingPanels: Map<string, ExistingPanelInfo>,
-  stats: CommitStats
+  stats: CommitStats,
+  opts: { force?: boolean } = {}
 ) {
   const locations: PhysicalLocation[] = [];
   const panels: Panel[] = [];
@@ -47,11 +55,12 @@ export async function commitBatch(
     }
 
     const existing = existingPanels.get(row.locationId);
-    if (existing && existing.serialNumber !== row.serialNumber) {
+    const mismatched = !!existing && existing.serialNumber !== row.serialNumber;
+    if (mismatched && !opts.force) {
       stats.serialMismatch++;
       stats.mismatches.push({
         locationId: row.locationId,
-        recordedSerial: existing.serialNumber,
+        recordedSerial: existing!.serialNumber,
         excelSerial: row.serialNumber,
       });
       continue; // do not touch this panel's data
@@ -72,7 +81,9 @@ export async function commitBatch(
       serialNumberShort: row.serialNumberShort ?? undefined,
       voltage: row.voltage ?? undefined,
       locationId: row.locationId,
-      status: existing?.status ?? 'normal', // preserve in-progress status; new panels start 'normal'
+      // force mode deliberately resets status to 'normal' -- it's specifically for undoing
+      // the status a historical-import Excel set (e.g. 'vacant'), not for routine re-imports.
+      status: opts.force ? 'normal' : existing?.status ?? 'normal',
       installDate: row.installDate ?? undefined,
       electrical: {
         pmpW: row.pmpW ?? undefined,
@@ -85,7 +96,8 @@ export async function commitBatch(
       sunManagerId: row.sunManagerId ?? undefined,
     });
 
-    if (existing) stats.updatedMasterData++;
+    if (mismatched) stats.restored++;
+    else if (existing) stats.updatedMasterData++;
     else stats.created++;
   }
 

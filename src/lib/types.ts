@@ -31,6 +31,7 @@ export type PanelStatus =
   | 'monitoring'
   | 'pending_replacement'
   | 'replaced'
+  | 'vacant' // panel physically removed (e.g. relocated to a working tracker) and not yet replaced -- no real panel here right now
   | 'closed';
 
 export type IssueStatus =

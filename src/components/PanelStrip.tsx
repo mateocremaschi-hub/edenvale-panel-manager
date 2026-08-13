@@ -10,6 +10,7 @@ interface Props {
 function panelStatusColor(status: Panel['status']): string {
   switch (status) {
     case 'pending_replacement':
+    case 'vacant':
       return 'rgba(217,83,79,0.9)';
     case 'issue_reported':
     case 'under_assessment':
@@ -78,7 +79,9 @@ export default function PanelStrip({ title, panels }: Props) {
         <div className="flex flex-col gap-2 rounded-lg border border-border px-3 py-2 text-xs">
           <div className="flex items-center justify-between">
             <span className="text-slate-400">Pos {active.locationId.split('.').pop()}</span>
-            <span className="font-mono text-slate-200">{active.serialNumber}</span>
+            <span className="font-mono text-slate-200">
+              {active.serialNumber.startsWith('VACANT-') ? 'No panel installed' : active.serialNumber}
+            </span>
             <span className="text-slate-400">{active.status}</span>
             <button onClick={() => copy(active.serialNumber)} className="text-accent-blue">
               Copy

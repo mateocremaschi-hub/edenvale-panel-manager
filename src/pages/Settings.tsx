@@ -7,7 +7,7 @@ import { useSession } from '@/store/session';
 import { newId } from '@/lib/id';
 import { hasSupabase } from '@/lib/supabase';
 import { pushLocationsAndPanels, type SyncProgress } from '@/lib/sync';
-import { parseHistoricalReplacementsFile, applyHistoricalReplacements, removeHistoricalReplacementRecords, type HistoricalApplyResult, type HistoricalCleanupResult } from '@/lib/historicalReplacements';
+import { parseHistoricalReplacementsFile, applyHistoricalReplacements, removeHistoricalReplacementRecords, findSuspectSerials, type HistoricalApplyResult, type HistoricalCleanupResult, type SuspectSerial } from '@/lib/historicalReplacements';
 
 export default function Settings() {
   const operators = useLiveQuery(() => db.operators.toArray(), [], []);
@@ -29,6 +29,21 @@ export default function Settings() {
   const [cleanupStatus, setCleanupStatus] = useState<string | null>(null);
   const [cleanupResult, setCleanupResult] = useState<HistoricalCleanupResult | null>(null);
   const [cleanupError, setCleanupError] = useState<string | null>(null);
+  const [auditBusy, setAuditBusy] = useState(false);
+  const [auditStatus, setAuditStatus] = useState<string | null>(null);
+  const [auditResult, setAuditResult] = useState<SuspectSerial[] | null>(null);
+
+  async function handleAudit() {
+    setAuditBusy(true);
+    setAuditResult(null);
+    try {
+      const suspects = await findSuspectSerials((scanned, total) => setAuditStatus(`Scanning ${scanned.toLocaleString()} / ${total.toLocaleString()}...`));
+      setAuditResult(suspects);
+    } finally {
+      setAuditBusy(false);
+      setAuditStatus(null);
+    }
+  }
 
   async function handleCleanup() {
     setCleanupError(null);
@@ -280,6 +295,12 @@ export default function Settings() {
         {histResult && (
           <div className="mb-3 flex flex-col gap-2 rounded-lg border border-border p-3 text-xs">
             <div className="text-status-replaced">✓ {histResult.matched} panel(s) updated.</div>
+            {histResult.vacated > 0 && (
+              <div className="text-status-pending">
+                ⚠ {histResult.vacated} row(s) had a non-serial "after" value (e.g. "To be installed") -- those panels
+                were marked vacant instead of getting a fake serial.
+              </div>
+            )}
             {histResult.alreadyCurrent.length > 0 && (
               <div className="text-slate-400">{histResult.alreadyCurrent.length} row(s) already matched (no change needed).</div>
             )}
@@ -329,6 +350,50 @@ export default function Settings() {
               Remove historical import replacement entries
             </button>
           )}
+        </div>
+
+        <div className="mt-4 border-t border-border pt-3">
+          <p className="mb-2 text-xs text-slate-500">
+            Scan every panel for a serial number that doesn't look real (blank, short text like "To be
+            installed", etc.) -- whether from this tool or the original farm import. Doesn't change
+            anything, just lists what it finds so you can review and fix each one on purpose.
+          </p>
+          {auditResult && (
+            <div className="mb-2 rounded-lg border border-border p-3 text-xs">
+              {auditResult.length === 0 ? (
+                <div className="text-status-replaced">✓ No suspect serials found.</div>
+              ) : (
+                <>
+                  <div className="mb-2 text-status-pending">⚠ {auditResult.length} panel(s) with a serial that doesn't look real:</div>
+                  <div className="max-h-60 overflow-y-auto">
+                    {auditResult.map((s) => (
+                      <div key={s.locationId} className="flex justify-between border-t border-border py-1 font-mono">
+                        <span>{s.locationId}</span>
+                        <span className="text-slate-400">{s.serialNumber || '(blank)'}</span>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+          {auditBusy ? (
+            <p className="text-xs text-slate-400">{auditStatus || 'Scanning...'}</p>
+          ) : (
+            <button onClick={handleAudit} className="rounded-lg border border-border px-4 py-2 text-sm font-semibold text-slate-300">
+              Scan for suspect serial numbers
+            </button>
+          )}
+        </div>
+
+        <div className="mt-4 border-t border-border pt-3">
+          <p className="mb-2 text-xs text-slate-500">
+            Want to undo ALL historical-replacement Excel imports and go back to exactly what the
+            original master farm export says?
+          </p>
+          <Link to="/restore-master" className="inline-block rounded-lg border border-status-pending px-4 py-2 text-sm font-semibold text-status-pending">
+            Restore panel data from master Excel
+          </Link>
         </div>
       </section>
 

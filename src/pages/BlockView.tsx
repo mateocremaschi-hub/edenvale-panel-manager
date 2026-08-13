@@ -39,7 +39,7 @@ function bump(map: Map<string, StringAgg>, key: string, status: Panel['status'])
   const a = map.get(key) ?? { total: 0, issue: 0, pending: 0, replaced: 0 };
   a.total++;
   if (status === 'issue_reported' || status === 'under_assessment' || status === 'monitoring') a.issue++;
-  if (status === 'pending_replacement') a.pending++;
+  if (status === 'pending_replacement' || status === 'vacant') a.pending++;
   if (status === 'replaced') a.replaced++;
   map.set(key, a);
 }
