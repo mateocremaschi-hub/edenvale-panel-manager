@@ -1,6 +1,7 @@
 import jsPDF from 'jspdf';
 import { db } from './db';
 import { GRS_LOGO_PNG_BASE64 } from './assets/grsLogo';
+import { activeProjectConfig } from '@/store/project';
 import type { Replacement, Issue, Photo, Operator } from './types';
 
 export interface ReplacementReportFilters {
@@ -143,7 +144,7 @@ async function drawDataPage(
   // 3x3 info grid.
   const colW = innerW / 6;
   const rows: [string, string, string, string, string, string][] = [
-    ['Date:', fmtDate(relatedIssue?.reportedDate ?? r.replacementDate), 'End date:', fmtDate(r.replacementDate), 'Installation:', 'Edenvale Solar Farm'],
+    ['Date:', fmtDate(relatedIssue?.reportedDate ?? r.replacementDate), 'End date:', fmtDate(r.replacementDate), 'Installation:', activeProjectConfig().name],
     ['Worktype:', 'Panel replacement', 'Status:', 'Completed', 'Equipment:', 'PV Module'],
     [
       'Priority:',

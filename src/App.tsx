@@ -2,6 +2,7 @@ import { HashRouter, Routes, Route } from 'react-router-dom';
 import NavBar from '@/components/NavBar';
 import StatusBar from '@/components/StatusBar';
 import OperatorGate from '@/components/OperatorGate';
+import ProjectGate from '@/components/ProjectGate';
 import Dashboard from '@/pages/Dashboard';
 import MapView from '@/pages/MapView';
 import SearchPage from '@/pages/Search';
@@ -21,6 +22,7 @@ export default function App() {
   const { needRefresh, applyUpdate } = useAppUpdate();
   return (
     <HashRouter>
+      <ProjectGate>
       <OperatorGate>
         <div className="flex min-h-screen flex-col md:flex-row">
           <NavBar />
@@ -52,6 +54,7 @@ export default function App() {
           </div>
         </div>
       </OperatorGate>
+      </ProjectGate>
     </HashRouter>
   );
 }

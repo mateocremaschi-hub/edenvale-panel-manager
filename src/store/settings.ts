@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import { activeProjectConfig } from './project';
 
 interface SettingsState {
   appName: string;
@@ -14,7 +15,7 @@ interface SettingsState {
 export const useSettings = create<SettingsState>()(
   persist(
     (set) => ({
-      appName: 'Edenvale Panel Manager',
+      appName: `${activeProjectConfig().name} Panel Manager`,
       adminPin: null,
       voltageMin: 30,
       voltageMax: 55,
