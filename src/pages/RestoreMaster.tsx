@@ -36,6 +36,7 @@ export default function RestoreMaster() {
 
   const [step, setStep] = useState<Step>('select');
   const [fileName, setFileName] = useState('');
+  const [selectedSheet, setSelectedSheet] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [totalRows, setTotalRows] = useState(0);
   const [headerRowIndex, setHeaderRowIndex] = useState(0);
@@ -50,20 +51,26 @@ export default function RestoreMaster() {
     sessionRef.current = session;
     try {
       const names = await session.listSheets(file);
-      const sheetName = names[0];
-      const { totalRows, previewRows } = await session.parseSheet(sheetName);
-      const hIdx = guessHeaderRowIndex(previewRows);
-      const headers = (previewRows[hIdx] ?? []).map((h) => String(h ?? '').trim());
-      const detected = autoDetectMapping(headers);
-      const missing = REQUIRED_IMPORT_FIELDS.filter((f) => !Object.values(detected).includes(f));
-      if (missing.length > 0) {
-        setError(`Could not auto-detect required columns (${missing.join(', ')}) in the first sheet of this file. Make sure it's the original master export.`);
-        return;
+      let found = false;
+      for (const sheetName of names) {
+        const { totalRows, previewRows } = await session.parseSheet(sheetName);
+        const hIdx = guessHeaderRowIndex(previewRows);
+        const headers = (previewRows[hIdx] ?? []).map((h) => String(h ?? '').trim());
+        const detected = autoDetectMapping(headers);
+        const missing = REQUIRED_IMPORT_FIELDS.filter((f) => !Object.values(detected).includes(f));
+        if (missing.length === 0) {
+          setTotalRows(totalRows);
+          setHeaderRowIndex(hIdx);
+          setMapping(detected);
+          setSelectedSheet(sheetName);
+          setStep('confirm');
+          found = true;
+          break;
+        }
       }
-      setTotalRows(totalRows);
-      setHeaderRowIndex(hIdx);
-      setMapping(detected);
-      setStep('confirm');
+      if (!found) {
+        setError(`Could not find a sheet with both a location and serial number column, checked: ${names.join(', ')}. Make sure this is the original master export.`);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
@@ -126,6 +133,9 @@ export default function RestoreMaster() {
           <div className="rounded-lg border border-border bg-bg-panel p-4 text-sm text-slate-300">
             <div>
               File: <span className="font-mono">{fileName}</span>
+            </div>
+            <div>
+              Sheet: <span className="font-mono">{selectedSheet}</span>
             </div>
             <div>{totalRows.toLocaleString()} rows detected, columns auto-mapped.</div>
           </div>
