@@ -81,7 +81,11 @@ export async function parseHistoricalReplacementsFile(file: File): Promise<Histo
 
   for (const sheetName of wb.SheetNames) {
     const ws = wb.Sheets[sheetName];
-    const rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null }) as unknown[][];
+    // raw: false -- prefer each cell's formatted TEXT over its parsed numeric value. Serials
+    // are 18 digits, well past Number.MAX_SAFE_INTEGER (~16 digits) and even past Excel's own
+    // 15-significant-digit precision -- if this column is formatted as a Number rather than
+    // Text, both Excel and a raw:true parse can silently corrupt the trailing digits.
+    const rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: null }) as unknown[][];
     if (rows.length < 2) continue;
 
     const header = rows[0].map((h) => String(h ?? '').trim().toLowerCase());
@@ -93,8 +97,8 @@ export async function parseHistoricalReplacementsFile(file: File): Promise<Histo
     const out: HistoricalRow[] = [];
     for (let i = 1; i < rows.length; i++) {
       const row = rows[i];
-      const before = row[beforeIdx] != null ? String(row[beforeIdx]).trim() : '';
-      const after = row[afterIdx] != null ? String(row[afterIdx]).trim() : '';
+      const before = row[beforeIdx] != null ? String(row[beforeIdx]).trim().replace(/[,\s]/g, '') : '';
+      const after = row[afterIdx] != null ? String(row[afterIdx]).trim().replace(/[,\s]/g, '') : '';
       if (!before || !after) continue;
       out.push({
         before,
