@@ -135,17 +135,24 @@ export function computeTrackerBoxSizes(geometry: BlockGeometry): Map<string, { w
   const globalW = clamp(globalGx * 0.82, minDim / 150, minDim / 6);
   const globalH = clamp(globalGy * 0.82, minDim / 150, minDim / 6);
 
-  // "Scattered" axis: almost as many distinct clusters as trackers means there are no real
-  // columns/rows to measure a pitch from by looking at raw positions directly -- e.g. a block
-  // laid out as a few long DIAGONAL rows (2 per side of the access road) has every tracker at
-  // a near-unique (cx,cy), even though there are really only a handful of rows. Every tracker
-  // already carries its `side` (North/South) + `pos` (row-within-side) from the extraction
-  // pipeline, which identifies which of those few real rows it belongs to independent of the
-  // block's angle -- group by that instead of raw nearest-neighbour distance, and measure the
-  // gap BETWEEN those group centers (the true row-to-row pitch), not between individual
-  // trackers within the same diagonal row (which is tiny and not what needs measuring).
-  const xScattered = gxGaps.length + 1 > trackers.length * 0.6;
-  const yScattered = gyGaps.length + 1 > trackers.length * 0.6;
+  // "Scattered" axis: two independent signals, either one is enough. (1) almost as many
+  // distinct clusters as trackers -- no real columns/rows to measure a pitch from. (2) the
+  // gap distribution is bimodal -- mostly tiny within-row gaps plus a few real between-row
+  // gaps -- which (1) alone can miss: block 17 has 51 clusters for 92 trackers (55%, just
+  // under the 60% cutoff) yet its median gap (14.8) is 19x smaller than its 90th-percentile
+  // gap (276), so the median still lands on the wrong (within-row) population. Confirmed
+  // against all 36 blocks: this combined check flags exactly the known-bad ones (5, 15, 16,
+  // 17, 24, 27) and nothing else.
+  function isScattered(gaps: number[], trackerCount: number): boolean {
+    if (gaps.length + 1 > trackerCount * 0.6) return true;
+    if (gaps.length < 5) return false;
+    const sorted = [...gaps].sort((a, b) => a - b);
+    const med = median(sorted);
+    const p90 = sorted[Math.floor(sorted.length * 0.9)];
+    return med > 0 && p90 / med > 4;
+  }
+  const xScattered = isScattered(gxGaps, trackers.length);
+  const yScattered = isScattered(gyGaps, trackers.length);
 
   let rowGroupW: number | null = null;
   let rowGroupH: number | null = null;
