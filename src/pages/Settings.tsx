@@ -7,7 +7,7 @@ import { useSession } from '@/store/session';
 import { newId } from '@/lib/id';
 import { hasSupabase } from '@/lib/supabase';
 import { pushLocationsAndPanels, type SyncProgress } from '@/lib/sync';
-import { parseHistoricalReplacementsFile, applyHistoricalReplacements, removeHistoricalReplacementRecords, findSuspectSerials, type HistoricalApplyResult, type HistoricalCleanupResult, type SuspectSerial } from '@/lib/historicalReplacements';
+import { parseHistoricalReplacementsFile, applyHistoricalReplacements, removeHistoricalReplacementRecords, findSuspectSerials, type HistoricalApplyResult, type HistoricalCleanupResult, type SuspectSerial, type HistoricalRow } from '@/lib/historicalReplacements';
 
 export default function Settings() {
   const operators = useLiveQuery(() => db.operators.toArray(), [], []);
@@ -25,6 +25,47 @@ export default function Settings() {
   const [histProgress, setHistProgress] = useState<{ done: number; total: number } | null>(null);
   const [histResult, setHistResult] = useState<HistoricalApplyResult | null>(null);
   const [histError, setHistError] = useState<string | null>(null);
+  const [histPreviewRows, setHistPreviewRows] = useState<HistoricalRow[] | null>(null);
+  const [histPreviewChecks, setHistPreviewChecks] = useState<Record<number, string> | null>(null);
+
+  async function handleHistoricalPreview(file: File) {
+    setHistError(null);
+    setHistResult(null);
+    setHistPreviewRows(null);
+    setHistPreviewChecks(null);
+    try {
+      const rows = await parseHistoricalReplacementsFile(file);
+      const sample = rows.slice(0, 10);
+      setHistPreviewRows(sample);
+      // For each sample row, check right now whether "before" actually matches a current
+      // panel -- and if not, whether that panel exists ANYWHERE under a slightly different
+      // (trimmed/case-insensitive) value, so a formatting mismatch is obvious immediately
+      // instead of guessing blind again.
+      const checks: Record<number, string> = {};
+      for (let i = 0; i < sample.length; i++) {
+        const exactBefore = await db.panels.where('serialNumber').equals(sample[i].before).first();
+        const exactAfter = await db.panels.where('serialNumber').equals(sample[i].after).first();
+        const parts: string[] = [];
+        if (exactBefore) {
+          parts.push(`before ✓ found at ${exactBefore.locationId}`);
+        } else {
+          const similar = await db.panels.where('serialNumber').startsWithIgnoreCase(sample[i].before.slice(0, 6)).limit(1).toArray();
+          parts.push(similar.length > 0 ? `before ✗ not found -- similar: "${similar[0].serialNumber}"` : 'before ✗ not found anywhere');
+        }
+        if (exactAfter) {
+          parts.push(`after ✓ already at ${exactAfter.locationId}`);
+        } else {
+          parts.push('after ✗ not found anywhere either');
+        }
+        checks[i] = parts.join(' · ');
+      }
+      setHistPreviewChecks(checks);
+      setHistFile(file);
+    } catch (err) {
+      setHistError(err instanceof Error ? err.message : String(err));
+    }
+  }
+  const [histFile, setHistFile] = useState<File | null>(null);
   const [cleanupBusy, setCleanupBusy] = useState(false);
   const [cleanupStatus, setCleanupStatus] = useState<string | null>(null);
   const [cleanupResult, setCleanupResult] = useState<HistoricalCleanupResult | null>(null);
@@ -79,6 +120,8 @@ export default function Settings() {
       }
       const result = await applyHistoricalReplacements(rows, operatorId!, (done, total) => setHistProgress({ done, total }));
       setHistResult(result);
+      setHistPreviewRows(null);
+      setHistPreviewChecks(null);
     } catch (err) {
       setHistError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -333,9 +376,39 @@ export default function Settings() {
               type="file"
               accept=".xlsx,.xls"
               className="hidden"
-              onChange={(e) => e.target.files?.[0] && handleHistoricalFile(e.target.files[0])}
+              onChange={(e) => e.target.files?.[0] && handleHistoricalPreview(e.target.files[0])}
             />
           </label>
+        )}
+
+        {histPreviewRows && !histBusy && (
+          <div className="mt-3 flex flex-col gap-2 rounded-lg border border-border p-3 text-xs">
+            <div className="font-semibold text-slate-300">
+              Preview -- first {histPreviewRows.length} row(s) as read from your file, checked against current data:
+            </div>
+            <div className="max-h-60 overflow-y-auto">
+              {histPreviewRows.map((r, i) => (
+                <div key={i} className="border-t border-border py-1 font-mono">
+                  <div>
+                    before: {r.before} → after: {r.after}
+                  </div>
+                  <div className={histPreviewChecks?.[i]?.includes('before ✓') ? 'text-status-replaced' : 'text-status-pending'}>
+                    {histPreviewChecks?.[i] ?? 'checking...'}
+                  </div>
+                </div>
+              ))}
+            </div>
+            <p className="text-slate-500">
+              Do those "before" values match what you see in the Excel exactly, digit for digit? If not, that's
+              the mismatch -- tell me what's different and we'll fix the reading instead of guessing again.
+            </p>
+            <button
+              onClick={() => histFile && handleHistoricalFile(histFile)}
+              className="self-start rounded-lg bg-accent-blue px-4 py-2 text-sm font-semibold text-white"
+            >
+              Looks right -- run the full update
+            </button>
+          </div>
         )}
 
         <div className="mt-4 border-t border-border pt-3">

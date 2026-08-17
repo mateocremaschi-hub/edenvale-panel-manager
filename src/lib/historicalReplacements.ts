@@ -3,6 +3,7 @@ import { db } from './db';
 import { newId } from './id';
 import { nowIso } from './time';
 import { getSupabase } from './supabase';
+import { looksLikeRealSerial } from './panelDisplay';
 import type { ActivityEvent } from './types';
 
 const HISTORICAL_MARKER = 'Historical import -- original technician not recorded';
@@ -59,17 +60,6 @@ export interface HistoricalApplyResult {
   relocatedFrom: number; // "after" was found installed elsewhere -- that ORIGIN location marked vacant too
   notFound: string[]; // "before" serials that don't exist as a current panel
   alreadyCurrent: string[]; // "before" serial IS a panel, but its serial already equals "after" (re-run, no-op)
-}
-
-/** Real serials in this farm's data are long digit-only strings (e.g. "821051140249164146").
- * Anything else in the "after" column -- "To be installed", blank, "TBD", etc -- means the
- * panel was physically removed (e.g. relocated from a stopped tracker to a working one) and
- * nothing has been installed in its place yet, NOT a literal new serial number. Never write
- * that text into serialNumber: it isn't unique (many vacant slots could carry the exact same
- * placeholder text), which breaks the assumption that a serial identifies one panel and risks
- * false collisions in search/lookup. */
-function looksLikeRealSerial(value: string): boolean {
-  return /^\d{10,20}$/.test(value.trim());
 }
 
 /** Reads the "Serial Number (Before)" / "Serial Number (After)" / "Type of module" columns from

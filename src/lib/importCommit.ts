@@ -4,6 +4,7 @@ import type { PhysicalLocation, Panel, PanelStatus } from './types';
 import { newId } from './id';
 import { nowIso } from './time';
 import { orientationFromModule } from './locationCode';
+import { looksLikeRealSerial } from './panelDisplay';
 
 export interface ExistingPanelInfo {
   serialNumber: string;
@@ -75,15 +76,21 @@ export async function commitBatch(
       positionInString: row.positionInString ?? 0,
       orientation: orientationFromModule(row.positionInString ?? 0),
     });
+    // Some source rows carry placeholder text ("To be installed", blank, etc) instead of a
+    // real serial -- e.g. a panel that was later moved elsewhere, or never commissioned as of
+    // this export. Never write that text into serialNumber: it isn't unique (many empty slots
+    // could carry the exact same placeholder), which breaks the assumption that a serial
+    // identifies one panel and risks false collisions in search/lookup.
+    const isVacant = !looksLikeRealSerial(row.serialNumber);
     panels.push({
       panelId: row.locationId,
-      serialNumber: row.serialNumber,
+      serialNumber: isVacant ? `VACANT-${row.locationId}` : row.serialNumber,
       serialNumberShort: row.serialNumberShort ?? undefined,
       voltage: row.voltage ?? undefined,
       locationId: row.locationId,
       // force mode deliberately resets status to 'normal' -- it's specifically for undoing
       // the status a historical-import Excel set (e.g. 'vacant'), not for routine re-imports.
-      status: opts.force ? 'normal' : existing?.status ?? 'normal',
+      status: isVacant ? 'vacant' : opts.force ? 'normal' : existing?.status ?? 'normal',
       installDate: row.installDate ?? undefined,
       electrical: {
         pmpW: row.pmpW ?? undefined,
