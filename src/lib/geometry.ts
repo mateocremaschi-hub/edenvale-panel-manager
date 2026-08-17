@@ -136,26 +136,64 @@ export function computeTrackerBoxSizes(geometry: BlockGeometry): Map<string, { w
   const globalH = clamp(globalGy * 0.82, minDim / 150, minDim / 6);
 
   // "Scattered" axis: almost as many distinct clusters as trackers means there are no real
-  // columns/rows to measure a pitch from.
+  // columns/rows to measure a pitch from by looking at raw positions directly -- e.g. a block
+  // laid out as a few long DIAGONAL rows (2 per side of the access road) has every tracker at
+  // a near-unique (cx,cy), even though there are really only a handful of rows. Every tracker
+  // already carries its `side` (North/South) + `pos` (row-within-side) from the extraction
+  // pipeline, which identifies which of those few real rows it belongs to independent of the
+  // block's angle -- group by that instead of raw nearest-neighbour distance, and measure the
+  // gap BETWEEN those group centers (the true row-to-row pitch), not between individual
+  // trackers within the same diagonal row (which is tiny and not what needs measuring).
   const xScattered = gxGaps.length + 1 > trackers.length * 0.6;
   const yScattered = gyGaps.length + 1 > trackers.length * 0.6;
+
+  let rowGroupW: number | null = null;
+  let rowGroupH: number | null = null;
+  if (xScattered || yScattered) {
+    const groups = new Map<string, { sumX: number; sumY: number; n: number }>();
+    for (const t of trackers) {
+      const gk = `${t.side}-${t.pos ?? 0}`;
+      const g = groups.get(gk) ?? { sumX: 0, sumY: 0, n: 0 };
+      g.sumX += t.cx;
+      g.sumY += t.cy;
+      g.n++;
+      groups.set(gk, g);
+    }
+    if (groups.size >= 2) {
+      const centersX = [...groups.values()].map((g) => g.sumX / g.n).sort((a, b) => a - b);
+      const centersY = [...groups.values()].map((g) => g.sumY / g.n).sort((a, b) => a - b);
+      const gapsX = centersX.slice(1).map((v, i) => v - centersX[i]);
+      const gapsY = centersY.slice(1).map((v, i) => v - centersY[i]);
+      if (gapsX.length > 0) rowGroupW = clamp(median(gapsX) * 0.7, minDim / 150, minDim / 5);
+      if (gapsY.length > 0) rowGroupH = clamp(median(gapsY) * 0.7, minDim / 150, minDim / 5);
+    }
+  }
 
   const sizes = new Map<string, { w: number; h: number }>();
   for (const [key, t] of entries) {
     let w = globalW;
     let h = globalH;
-    if (xScattered || yScattered) {
+    if (xScattered && rowGroupW != null) {
+      w = rowGroupW;
+    } else if (xScattered) {
       let nearestDx = Infinity;
-      let nearestDy = Infinity;
       for (const t2 of trackers) {
         if (t2 === t) continue;
         const dx = Math.abs(t.cx - t2.cx);
-        const dy = Math.abs(t.cy - t2.cy);
         if (dx > 1 && dx < nearestDx) nearestDx = dx;
+      }
+      if (Number.isFinite(nearestDx)) w = clamp(nearestDx * 0.7, minDim / 150, minDim / 6);
+    }
+    if (yScattered && rowGroupH != null) {
+      h = rowGroupH;
+    } else if (yScattered) {
+      let nearestDy = Infinity;
+      for (const t2 of trackers) {
+        if (t2 === t) continue;
+        const dy = Math.abs(t.cy - t2.cy);
         if (dy > 1 && dy < nearestDy) nearestDy = dy;
       }
-      if (xScattered && Number.isFinite(nearestDx)) w = clamp(nearestDx * 0.7, minDim / 150, minDim / 6);
-      if (yScattered && Number.isFinite(nearestDy)) h = clamp(nearestDy * 0.7, minDim / 150, minDim / 6);
+      if (Number.isFinite(nearestDy)) h = clamp(nearestDy * 0.7, minDim / 150, minDim / 6);
     }
     sizes.set(key, { w, h });
   }
