@@ -55,7 +55,8 @@ export interface HistoricalRow {
 
 export interface HistoricalApplyResult {
   matched: number;
-  vacated: number; // "after" wasn't a real serial -- panel marked vacant instead
+  vacated: number; // "after" wasn't a real serial -- destination marked vacant instead
+  relocatedFrom: number; // "after" was found installed elsewhere -- that ORIGIN location marked vacant too
   notFound: string[]; // "before" serials that don't exist as a current panel
   alreadyCurrent: string[]; // "before" serial IS a panel, but its serial already equals "after" (re-run, no-op)
 }
@@ -108,44 +109,53 @@ export async function parseHistoricalReplacementsFile(file: File): Promise<Histo
 }
 
 /**
- * For each row, looks up the "before" serial among CURRENT panels. If found, updates that
- * panel's serial straight to "after" and logs a lightweight activity event for the audit
+ * For each row, looks up the "before" serial among CURRENT panels (the DESTINATION -- where a
+ * panel is being installed/corrected) and logs a lightweight activity event for the audit
  * trail -- deliberately NOT a Replacement record, so this doesn't show up in the Replacements
  * list, the Corrective Report PDF, or the Dashboard's replacement counts. This is a silent data
- * correction (the panel was swapped in the field before this app existed, or without being
- * logged) -- not a new field event happening today. Rows whose "before" serial isn't found as
- * a current panel are left alone and reported back -- that panel may already have been
- * replaced again since, or the serial may not exist in this farm's data at all; both are worth
- * a human look, not a silent skip.
+ * correction (something that already happened in the field, not a new event happening today).
+ *
+ * IMPORTANT: if the "after" serial is a real one, this ALSO looks up where that panel is
+ * CURRENTLY recorded -- if that's a different location, the panel was physically relocated
+ * (e.g. moved from a stopped tracker to patch a working one), so its ORIGIN location is marked
+ * vacant too. Without this, the origin slot would keep showing a serial number for a panel
+ * that isn't physically there anymore.
+ *
+ * Rows whose "before" serial isn't found as a current panel are left alone and reported back --
+ * that panel may already have been replaced again since, or the serial may not exist in this
+ * farm's data at all; both are worth a human look, not a silent skip.
  */
 export async function applyHistoricalReplacements(
   rows: HistoricalRow[],
   operatorId: string,
   onProgress?: (done: number, total: number) => void
 ): Promise<HistoricalApplyResult> {
-  const result: HistoricalApplyResult = { matched: 0, vacated: 0, notFound: [], alreadyCurrent: [] };
+  const result: HistoricalApplyResult = { matched: 0, vacated: 0, relocatedFrom: 0, notFound: [], alreadyCurrent: [] };
 
   for (let i = 0; i < rows.length; i++) {
     const { before, after, moduleType } = rows[i];
     onProgress?.(i + 1, rows.length);
 
-    const panel = await db.panels.where('serialNumber').equals(before).first();
-    if (!panel) {
+    const destPanel = await db.panels.where('serialNumber').equals(before).first();
+    if (!destPanel) {
       result.notFound.push(before);
       continue;
     }
-    if (panel.serialNumber === after) {
+    if (destPanel.serialNumber === after) {
       result.alreadyCurrent.push(before);
       continue;
     }
 
     const isVacating = !looksLikeRealSerial(after);
-    const newSerial = isVacating ? `VACANT-${panel.locationId}` : after;
+    // Look this up BEFORE writing anything -- once destPanel's serial is overwritten below, a
+    // lookup by "after" would otherwise be ambiguous/miss its own just-written copy.
+    const originPanel = isVacating ? undefined : await db.panels.where('serialNumber').equals(after).first();
+    const newSerial = isVacating ? `VACANT-${destPanel.locationId}` : after;
 
-    const event: ActivityEvent = {
+    const destEvent: ActivityEvent = {
       eventId: newId('evt'),
       entityType: 'panel',
-      entityId: panel.panelId,
+      entityId: destPanel.panelId,
       action: isVacating ? 'historical_panel_vacated' : 'historical_serial_correction',
       previousValue: before,
       newValue: after,
@@ -158,11 +168,31 @@ export async function applyHistoricalReplacements(
     };
 
     await db.transaction('rw', db.panels, db.activityEvents, async () => {
-      await db.panels.update(panel.panelId, { serialNumber: newSerial, status: isVacating ? 'vacant' : panel.status });
-      await db.activityEvents.add(event);
+      await db.panels.update(destPanel.panelId, { serialNumber: newSerial, status: isVacating ? 'vacant' : 'normal' });
+      await db.activityEvents.add(destEvent);
     });
     if (isVacating) result.vacated++;
     else result.matched++;
+
+    if (originPanel && originPanel.locationId !== destPanel.locationId) {
+      const originEvent: ActivityEvent = {
+        eventId: newId('evt'),
+        entityType: 'panel',
+        entityId: originPanel.panelId,
+        action: 'historical_panel_relocated',
+        previousValue: after,
+        newValue: `VACANT-${originPanel.locationId}`,
+        operator: operatorId,
+        timestamp: nowIso(),
+        syncStatus: 'pending',
+        correctionReason: `Panel ${after} was physically moved to ${destPanel.locationId} -- this, its original location, is now empty.`,
+      };
+      await db.transaction('rw', db.panels, db.activityEvents, async () => {
+        await db.panels.update(originPanel.panelId, { serialNumber: `VACANT-${originPanel.locationId}`, status: 'vacant' });
+        await db.activityEvents.add(originEvent);
+      });
+      result.relocatedFrom++;
+    }
   }
 
   return result;

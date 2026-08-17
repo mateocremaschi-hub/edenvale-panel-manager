@@ -55,6 +55,7 @@ export default function Replacements() {
     panelId: string;
     issueId?: string;
   } | null>(null);
+  const isVacantSlot = current?.serial.startsWith('VACANT-') ?? false;
 
   const [blockFilter, setBlockFilter] = useState('');
   const [search, setSearch] = useState('');
@@ -273,10 +274,10 @@ export default function Replacements() {
         replacementId,
         locationId: current.locationId,
         removedPanelId: current.panelId,
-        removedSerial: current.serial,
+        removedSerial: isVacantSlot ? '(none -- new install, no panel was here)' : current.serial,
         installedPanelId: current.panelId, // the physical location id stays stable across serials
         installedSerial: serial,
-        oldVoltage: current.voltage,
+        oldVoltage: isVacantSlot ? undefined : current.voltage,
         newVoltage: voltageNum,
         replacementDate: nowIso(),
         replacedBy: operatorId!,
@@ -294,7 +295,7 @@ export default function Replacements() {
         await db.panels.update(current.panelId, {
           serialNumber: serial,
           voltage: voltageNum,
-          status: 'replaced',
+          status: isVacantSlot ? 'normal' : 'replaced',
         });
         // Close every open report at this location, not just one -- if more than one was
         // ever logged here, a replacement resolves all of them, not just whichever happened
@@ -311,8 +312,8 @@ export default function Replacements() {
           eventId: newId('evt'),
           entityType: 'replacement',
           entityId: replacementId,
-          action: 'replacement_confirmed',
-          previousValue: current.serial,
+          action: isVacantSlot ? 'panel_installed' : 'replacement_confirmed',
+          previousValue: isVacantSlot ? undefined : current.serial,
           newValue: serial,
           operator: operatorId!,
           timestamp: nowIso(),
@@ -499,10 +500,14 @@ export default function Replacements() {
           ) : (
             <div className="flex flex-col gap-3">
               <div className="rounded-lg border border-border bg-bg p-3 text-sm">
-                <div className="text-slate-400">Removing</div>
-                <div className="font-mono text-slate-100">{current.serial}</div>
+                <div className="text-slate-400">{isVacantSlot ? 'Installing at' : 'Removing'}</div>
+                {isVacantSlot ? (
+                  <div className="font-mono text-slate-500">No panel currently installed here</div>
+                ) : (
+                  <div className="font-mono text-slate-100">{current.serial}</div>
+                )}
                 <div className="text-xs text-slate-500">
-                  {current.locationId} {current.voltage ? `· ${current.voltage.toFixed(2)}V` : ''}
+                  {current.locationId} {!isVacantSlot && current.voltage ? `· ${current.voltage.toFixed(2)}V` : ''}
                 </div>
               </div>
               <div className="flex gap-2">
@@ -531,7 +536,7 @@ export default function Replacements() {
               <input
                 value={replacedByName}
                 onChange={(e) => setReplacedByName(e.target.value)}
-                placeholder="Replaced by (technician name)"
+                placeholder={isVacantSlot ? 'Installed by (technician name)' : 'Replaced by (technician name)'}
                 className="rounded-lg border border-border bg-bg px-3 py-2 text-sm text-slate-100"
               />
               <input
@@ -614,7 +619,7 @@ export default function Replacements() {
                   disabled={saving}
                   className="rounded-lg bg-accent-blue px-4 py-2 text-sm font-semibold text-white disabled:opacity-40"
                 >
-                  Confirm replacement
+                  Confirm {isVacantSlot ? 'installation' : 'replacement'}
                 </button>
                 <button
                   onClick={() => {

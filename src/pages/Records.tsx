@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '@/lib/db';
 import { compareLocationIds } from '@/lib/locationCode';
+import { displaySerial } from '@/lib/panelDisplay';
 import type { PanelStatus } from '@/lib/types';
 
 const TABS: { key: PanelStatus | 'all'; label: string }[] = [
@@ -99,7 +100,7 @@ export default function Records() {
             {filtered.slice(0, 200).map((p) => (
               <tr key={p.panelId} className="border-t border-border">
                 <td className="px-3 py-2 font-mono text-xs">{p.locationId}</td>
-                <td className="px-3 py-2 font-mono text-xs">{p.serialNumber}</td>
+                <td className="px-3 py-2 font-mono text-xs">{displaySerial(p.serialNumber)}</td>
                 <td className="px-3 py-2">{p.status}</td>
                 <td className="px-3 py-2">{p.voltage?.toFixed(2) ?? '-'}</td>
               </tr>

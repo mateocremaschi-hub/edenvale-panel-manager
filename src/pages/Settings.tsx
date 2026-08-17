@@ -301,6 +301,12 @@ export default function Settings() {
                 were marked vacant instead of getting a fake serial.
               </div>
             )}
+            {histResult.relocatedFrom > 0 && (
+              <div className="text-status-pending">
+                ⚠ {histResult.relocatedFrom} panel(s) were found already installed elsewhere -- their ORIGINAL
+                location was marked vacant, since the panel physically moved away from there.
+              </div>
+            )}
             {histResult.alreadyCurrent.length > 0 && (
               <div className="text-slate-400">{histResult.alreadyCurrent.length} row(s) already matched (no change needed).</div>
             )}

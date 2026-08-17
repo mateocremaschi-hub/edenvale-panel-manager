@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { db } from '@/lib/db';
 import { compareLocationIds } from '@/lib/locationCode';
+import { displaySerial } from '@/lib/panelDisplay';
 import type { Panel } from '@/lib/types';
 import { t } from '@/i18n';
 
@@ -61,7 +62,7 @@ export default function SearchPage() {
       <div className="mt-4 flex flex-col gap-2">
         {results.map((p) => (
           <div key={p.panelId} className="rounded-xl border border-border bg-bg-panel p-3">
-            <div className="font-mono text-sm text-slate-100">{p.serialNumber}</div>
+            <div className="font-mono text-sm text-slate-100">{displaySerial(p.serialNumber)}</div>
             <div className="text-xs text-slate-400">
               Block {p.locationId.split('.')[0]} · {p.locationId} · {p.status}
             </div>
