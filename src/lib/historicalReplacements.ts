@@ -119,7 +119,10 @@ export async function parseHistoricalReplacementsFile(file: File): Promise<Histo
  * CURRENTLY recorded -- if that's a different location, the panel was physically relocated
  * (e.g. moved from a stopped tracker to patch a working one), so its ORIGIN location is marked
  * vacant too. Without this, the origin slot would keep showing a serial number for a panel
- * that isn't physically there anymore.
+ * that isn't physically there anymore. This origin check runs EVERY time, even when the
+ * destination already matches "after" from an earlier run of this same file -- re-running
+ * must still catch a relocation that hadn't been vacated yet, otherwise a file applied once
+ * before this check existed would silently never trigger it.
  *
  * Rows whose "before" serial isn't found as a current panel are left alone and reported back --
  * that panel may already have been replaced again since, or the serial may not exist in this
@@ -141,57 +144,61 @@ export async function applyHistoricalReplacements(
       result.notFound.push(before);
       continue;
     }
-    if (destPanel.serialNumber === after) {
-      result.alreadyCurrent.push(before);
-      continue;
-    }
 
     const isVacating = !looksLikeRealSerial(after);
-    // Look this up BEFORE writing anything -- once destPanel's serial is overwritten below, a
-    // lookup by "after" would otherwise be ambiguous/miss its own just-written copy.
-    const originPanel = isVacating ? undefined : await db.panels.where('serialNumber').equals(after).first();
-    const newSerial = isVacating ? `VACANT-${destPanel.locationId}` : after;
+    const destAlreadyMatches = destPanel.serialNumber === after;
 
-    const destEvent: ActivityEvent = {
-      eventId: newId('evt'),
-      entityType: 'panel',
-      entityId: destPanel.panelId,
-      action: isVacating ? 'historical_panel_vacated' : 'historical_serial_correction',
-      previousValue: before,
-      newValue: after,
-      operator: operatorId,
-      timestamp: nowIso(),
-      syncStatus: 'pending',
-      correctionReason: [moduleType ? `Module type: ${moduleType}` : null, isVacating ? `Spreadsheet said "${after}" -- treated as vacant, not a real serial.` : null]
-        .filter(Boolean)
-        .join(' '),
-    };
-
-    await db.transaction('rw', db.panels, db.activityEvents, async () => {
-      await db.panels.update(destPanel.panelId, { serialNumber: newSerial, status: isVacating ? 'vacant' : 'normal' });
-      await db.activityEvents.add(destEvent);
-    });
-    if (isVacating) result.vacated++;
-    else result.matched++;
-
-    if (originPanel && originPanel.locationId !== destPanel.locationId) {
-      const originEvent: ActivityEvent = {
+    if (destAlreadyMatches) {
+      result.alreadyCurrent.push(before);
+    } else {
+      const newSerial = isVacating ? `VACANT-${destPanel.locationId}` : after;
+      const destEvent: ActivityEvent = {
         eventId: newId('evt'),
         entityType: 'panel',
-        entityId: originPanel.panelId,
-        action: 'historical_panel_relocated',
-        previousValue: after,
-        newValue: `VACANT-${originPanel.locationId}`,
+        entityId: destPanel.panelId,
+        action: isVacating ? 'historical_panel_vacated' : 'historical_serial_correction',
+        previousValue: before,
+        newValue: after,
         operator: operatorId,
         timestamp: nowIso(),
         syncStatus: 'pending',
-        correctionReason: `Panel ${after} was physically moved to ${destPanel.locationId} -- this, its original location, is now empty.`,
+        correctionReason: [moduleType ? `Module type: ${moduleType}` : null, isVacating ? `Spreadsheet said "${after}" -- treated as vacant, not a real serial.` : null]
+          .filter(Boolean)
+          .join(' '),
       };
       await db.transaction('rw', db.panels, db.activityEvents, async () => {
-        await db.panels.update(originPanel.panelId, { serialNumber: `VACANT-${originPanel.locationId}`, status: 'vacant' });
-        await db.activityEvents.add(originEvent);
+        await db.panels.update(destPanel.panelId, { serialNumber: newSerial, status: isVacating ? 'vacant' : 'normal' });
+        await db.activityEvents.add(destEvent);
       });
-      result.relocatedFrom++;
+      if (isVacating) result.vacated++;
+      else result.matched++;
+    }
+
+    // Always check for a relocation, even when the destination already matched from an
+    // earlier run -- re-running the same file must still catch an origin that hasn't been
+    // vacated yet. Skipping this whenever destAlreadyMatches was a real bug: a file applied
+    // once before this relocation check existed would silently never trigger it on re-run.
+    if (!isVacating) {
+      const originPanel = await db.panels.where('serialNumber').equals(after).first();
+      if (originPanel && originPanel.locationId !== destPanel.locationId && !originPanel.serialNumber.startsWith('VACANT-')) {
+        const originEvent: ActivityEvent = {
+          eventId: newId('evt'),
+          entityType: 'panel',
+          entityId: originPanel.panelId,
+          action: 'historical_panel_relocated',
+          previousValue: after,
+          newValue: `VACANT-${originPanel.locationId}`,
+          operator: operatorId,
+          timestamp: nowIso(),
+          syncStatus: 'pending',
+          correctionReason: `Panel ${after} was physically moved to ${destPanel.locationId} -- this, its original location, is now empty.`,
+        };
+        await db.transaction('rw', db.panels, db.activityEvents, async () => {
+          await db.panels.update(originPanel.panelId, { serialNumber: `VACANT-${originPanel.locationId}`, status: 'vacant' });
+          await db.activityEvents.add(originEvent);
+        });
+        result.relocatedFrom++;
+      }
     }
   }
 
