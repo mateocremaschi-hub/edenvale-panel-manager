@@ -109,18 +109,55 @@ function clusterGaps(vals: number[], tolerance = 10): number[] {
 /** Uniform box size for every tracker in the block, from the block's own typical
  * column/row pitch. Deliberately NOT varied per tracker -- an earlier per-tracker "shrink
  * near close neighbours" version produced an inconsistent patchwork of very different sizes
- * within the same block, which looked worse than the rare tight spot touching slightly. If a
- * specific block still has genuine overlap, that's a block-specific tweak, not a general one. */
+ * within the same block, which looked worse than the rare tight spot touching slightly.
+ *
+ * EXCEPTION: a handful of blocks (confirmed: 5, 15, 16, 17, 24, 27) have a genuinely
+ * scattered/fan layout on one axis rather than clean columns -- almost every tracker sits at
+ * its own near-unique position, so "typical gap between columns" isn't a meaningful number
+ * (it measures the tiny spacing between individually-adjacent trackers, not a real column
+ * pitch) and comes out far too small, rendering huge empty-looking gaps where whole rows of
+ * trackers are actually just squeezed down to near-invisible size. Detected automatically
+ * (not hardcoded by block number, so it self-corrects for any block, present or future):
+ * if most trackers don't share a position with any other on an axis, that axis falls back to
+ * each tracker's own nearest-neighbour distance along that axis specifically, instead of the
+ * block-wide median. */
 export function computeTrackerBoxSizes(geometry: BlockGeometry): Map<string, { w: number; h: number }> {
-  const trackers = Object.values(geometry.trackers);
+  const entries = Object.entries(geometry.trackers);
+  const trackers = entries.map(([, t]) => t);
   const minDim = Math.min(geometry.w, geometry.h);
 
-  const globalGx = median(clusterGaps(trackers.map((t) => t.cx))) || geometry.w / 20;
-  const globalGy = median(clusterGaps(trackers.map((t) => t.cy))) || geometry.h / 20;
-  const w = clamp(globalGx * 0.82, minDim / 150, minDim / 6);
-  const h = clamp(globalGy * 0.82, minDim / 150, minDim / 6);
+  const cxVals = trackers.map((t) => t.cx);
+  const cyVals = trackers.map((t) => t.cy);
+  const gxGaps = clusterGaps(cxVals);
+  const gyGaps = clusterGaps(cyVals);
+  const globalGx = median(gxGaps) || geometry.w / 20;
+  const globalGy = median(gyGaps) || geometry.h / 20;
+  const globalW = clamp(globalGx * 0.82, minDim / 150, minDim / 6);
+  const globalH = clamp(globalGy * 0.82, minDim / 150, minDim / 6);
+
+  // "Scattered" axis: almost as many distinct clusters as trackers means there are no real
+  // columns/rows to measure a pitch from.
+  const xScattered = gxGaps.length + 1 > trackers.length * 0.6;
+  const yScattered = gyGaps.length + 1 > trackers.length * 0.6;
 
   const sizes = new Map<string, { w: number; h: number }>();
-  for (const key of Object.keys(geometry.trackers)) sizes.set(key, { w, h });
+  for (const [key, t] of entries) {
+    let w = globalW;
+    let h = globalH;
+    if (xScattered || yScattered) {
+      let nearestDx = Infinity;
+      let nearestDy = Infinity;
+      for (const t2 of trackers) {
+        if (t2 === t) continue;
+        const dx = Math.abs(t.cx - t2.cx);
+        const dy = Math.abs(t.cy - t2.cy);
+        if (dx > 1 && dx < nearestDx) nearestDx = dx;
+        if (dy > 1 && dy < nearestDy) nearestDy = dy;
+      }
+      if (xScattered && Number.isFinite(nearestDx)) w = clamp(nearestDx * 0.7, minDim / 150, minDim / 6);
+      if (yScattered && Number.isFinite(nearestDy)) h = clamp(nearestDy * 0.7, minDim / 150, minDim / 6);
+    }
+    sizes.set(key, { w, h });
+  }
   return sizes;
 }
