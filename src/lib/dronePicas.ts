@@ -16,6 +16,24 @@ const UTM_SOUTHERN = true;
 // string per row. A pica row's north-south line spans that full 56-panel width.
 const PANELS_PER_ROW = 56;
 
+// Real field measurements (user measured directly): panel width ~1.130m (matches the CONF
+// sheet's module_width_m almost exactly), gap between panels ~0.020m, and -- importantly --
+// the pica sits ~1.400m beyond the edge of the first/last panel, not right at it. Treating the
+// whole pica-to-pica span as 56 EQUAL slices (the original approach) quietly assumed panel 1
+// starts exactly at the pica, which overstates the true panel pitch and skews every position
+// toward the middle. Using the real pitch (panel + gap) and subtracting the fixed offset before
+// dividing gives a noticeably closer fit against real segment lengths (verified: a real 65.47m
+// segment's position-56 center lands at 64.65m by this formula, leaving a sensible ~0.8m for
+// the far end's own offset -- much tighter than assuming a uniform 56-way split).
+const PANEL_PITCH_M = 1.13 + 0.02;
+const PICA_OFFSET_M = 1.4;
+
+function positionFromDistance(distanceM: number): number {
+  const raw = Math.round((distanceM - PICA_OFFSET_M) / PANEL_PITCH_M) + 1;
+  return Math.max(1, Math.min(PANELS_PER_ROW, raw));
+}
+
+
 // Which of the row's two strings (index 1 or 2) sits nearest the DC box -- i.e. covers combined
 // positions 1-28 vs 29-56. Confirmed by 4 real field tests across 2 different trackers on
 // BOTH sides of the road (block 4 tracker 016, and one more tracker on the South side) --
@@ -152,6 +170,7 @@ export interface PanelMatch {
   serialNumber?: string;
   row?: string; // e.g. "R4" -- which physical row this was, once resolved
   positionUnconfirmed?: boolean; // geometry unavailable -- couldn't apply the North/South flip or string split
+  nearbyCandidates?: { locationId: string; serialNumber?: string; offset: number }[]; // offset: -2..+2 panels from the main match, for visual cross-checking against GPS uncertainty
   debug: {
     isMotorRow: boolean;
     t: number; // 0 = north pica, 1 = south pica, along the matched row's line
@@ -182,9 +201,12 @@ export async function findNearestPanel(query: LatLon): Promise<PanelMatch | null
   }
   if (!best) return null;
 
-  // Raw position (1-56) treating the north pica as position 1 -- only actually correct for
-  // South-side trackers (see the flip below).
-  const rawPosition = Math.max(1, Math.min(PANELS_PER_ROW, Math.round(best.t * (PANELS_PER_ROW - 1)) + 1));
+  // Distance from the north pica along the row, in metres -- position comes from the real
+  // panel pitch and pica offset (positionFromDistance), not from treating the whole pica-to-
+  // pica span as 56 equal slices. This raw value still treats the north pica as position 1 --
+  // only actually correct for South-side trackers (see the flip below).
+  const distanceFromNorthPicaM = best.t * best.segmentLengthM;
+  const rawPosition = positionFromDistance(distanceFromNorthPicaM);
   let combinedPosition = rawPosition;
   const match: PanelMatch = {
     block: best.pica.block,
@@ -239,6 +261,31 @@ export async function findNearestPanel(query: LatLon): Promise<PanelMatch | null
           if (panel) match.serialNumber = panel.serialNumber;
         }
       }
+
+      // A drone photo's GPS is rarely survey-grade (a few metres of error is typical without
+      // RTK correction) -- on a ~65m/56-panel row that alone can span 2-3 panels either way.
+      // Rather than present one guess as certain, also resolve the +/-2 neighbours so the
+      // technician can visually cross-check against the thermal photo instead of trusting a
+      // single point estimate blindly.
+      const candidates: { locationId: string; serialNumber?: string; offset: number }[] = [];
+      for (let offset = -2; offset <= 2; offset++) {
+        if (offset === 0) continue;
+        const neighborCombined = combinedPosition + offset;
+        if (neighborCombined < 1 || neighborCombined > PANELS_PER_ROW) continue;
+        const { stringIndex: nStringIndex, module: nModule } = stringIndexAndModule(neighborCombined);
+        const nStringEntry = geometry.strings.find((s) => {
+          if (s.t !== String(best!.pica.tracker).padStart(3, '0') || s.r !== row) return false;
+          const parts = parseStringCode(s.n);
+          return parts?.string === nStringIndex;
+        });
+        if (!nStringEntry) continue;
+        const nParts = parseStringCode(nStringEntry.n);
+        if (!nParts) continue;
+        const nLocationId = `${nParts.block}.${nParts.inverter}.${nParts.dcBox}.${nParts.arrayBus}.${nParts.string}.${nModule}`;
+        const nPanel = await db.panels.get(nLocationId);
+        candidates.push({ locationId: nLocationId, serialNumber: nPanel?.serialNumber, offset });
+      }
+      match.nearbyCandidates = candidates.sort((a, b) => a.offset - b.offset);
     }
   } catch {
     // geometry not available for this block -- still return the block/tracker/position match,

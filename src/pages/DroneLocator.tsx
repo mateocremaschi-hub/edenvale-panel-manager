@@ -198,6 +198,25 @@ export default function DroneLocator() {
               </div>
             )}
             <div className="mt-2 text-xs text-slate-500">Match confidence: ~{match.distanceM.toFixed(1)}m from the estimated panel position.</div>
+            {match.nearbyCandidates && match.nearbyCandidates.length > 0 && (
+              <div className="mt-3 border-t border-border pt-3">
+                <div className="mb-1 text-xs text-slate-400">
+                  GPS from drone photos usually has a few metres of margin -- check these neighbours too if the
+                  main match doesn't look right in the thermal photo:
+                </div>
+                <div className="space-y-1">
+                  {match.nearbyCandidates.map((c) => (
+                    <div key={c.locationId} className="flex justify-between font-mono text-xs text-slate-400">
+                      <span>
+                        {c.offset > 0 ? '+' : ''}
+                        {c.offset}: {c.locationId}
+                      </span>
+                      <span>{c.serialNumber ? displaySerial(c.serialNumber) : ''}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
             <details className="mt-2 text-xs text-slate-500">
               <summary className="cursor-pointer">Show calculation details</summary>
               <div className="mt-1 space-y-0.5 font-mono">
