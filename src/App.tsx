@@ -13,6 +13,7 @@ import Sync from '@/pages/Sync';
 import Settings from '@/pages/Settings';
 import Import from '@/pages/Import';
 import RestoreMaster from '@/pages/RestoreMaster';
+import DroneLocator from '@/pages/DroneLocator';
 import BlockView from '@/pages/BlockView';
 import { useAutoSync } from '@/hooks/useAutoSync';
 import { useAppUpdate } from '@/hooks/useAppUpdate';
@@ -49,6 +50,7 @@ export default function App() {
                 <Route path="/settings" element={<Settings />} />
                 <Route path="/import" element={<Import />} />
                 <Route path="/restore-master" element={<RestoreMaster />} />
+                <Route path="/locate" element={<DroneLocator />} />
               </Routes>
             </main>
           </div>

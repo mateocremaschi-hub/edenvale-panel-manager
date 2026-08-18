@@ -6,6 +6,21 @@ export interface MetaEntry {
   value: string;
 }
 
+/** North/south pica GPS coordinates for one physical row of panels on a tracker, imported
+ * from a drone-survey Excel (UTM, converted to lat/lon at import time -- see lib/utm.ts and
+ * lib/dronePicas.ts). A single tracker (R1 only) has one row; a double tracker (R2+R3 or
+ * R4+R5) has two -- isMotorRow distinguishes them per the survey's own MOTOR ROW column. */
+export interface TrackerPica {
+  id: string; // `${block}-${tracker}-${isMotorRow ? 'motor' : 'slave'}`
+  block: number;
+  tracker: number;
+  isMotorRow: boolean;
+  northLat: number;
+  northLon: number;
+  southLat: number;
+  southLon: number;
+}
+
 export class PanelManagerDB extends Dexie {
   locations!: Table<PhysicalLocation, string>;
   panels!: Table<Panel, string>;
@@ -15,6 +30,7 @@ export class PanelManagerDB extends Dexie {
   operators!: Table<Operator, string>;
   photos!: Table<Photo, string>;
   meta!: Table<MetaEntry, string>;
+  trackerPicas!: Table<TrackerPica, string>;
 
   constructor() {
     super('edenvale-panel-manager');
@@ -35,6 +51,10 @@ export class PanelManagerDB extends Dexie {
     // seed or a real import, so the Import wizard can warn before overwriting it).
     this.version(2).stores({
       meta: 'key',
+    });
+    // v3 adds `trackerPicas` for drone-photo-to-panel GPS lookup.
+    this.version(3).stores({
+      trackerPicas: 'id, block, tracker',
     });
   }
 }

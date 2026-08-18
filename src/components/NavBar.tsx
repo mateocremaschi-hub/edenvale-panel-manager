@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom';
-import { LayoutDashboard, Map, Search, FileWarning, Replace, Table2, RefreshCw, Settings } from 'lucide-react';
+import { LayoutDashboard, Map, Search, FileWarning, Replace, Table2, RefreshCw, Settings, Crosshair } from 'lucide-react';
 import { t } from '@/i18n';
 
 const items = [
@@ -7,6 +7,7 @@ const items = [
   { to: '/map', label: t('nav_map'), icon: Map },
   { to: '/replacements', label: t('nav_replacements'), icon: Replace },
   { to: '/reports', label: t('nav_reports'), icon: FileWarning },
+  { to: '/locate', label: 'Locate', icon: Crosshair },
   { to: '/records', label: t('nav_records'), icon: Table2 },
   { to: '/search', label: t('nav_search'), icon: Search },
   { to: '/sync', label: t('nav_sync'), icon: RefreshCw },
