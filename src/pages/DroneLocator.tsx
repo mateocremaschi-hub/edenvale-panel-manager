@@ -4,6 +4,7 @@ import * as exifr from 'exifr';
 import { db } from '@/lib/db';
 import { displaySerial } from '@/lib/panelDisplay';
 import { parsePicaExcelFile, importTrackerPicas, findNearestPanel, type PicaImportRow, type PanelMatch } from '@/lib/dronePicas';
+import { parseDMS } from '@/lib/utm';
 
 export default function DroneLocator() {
   const [importBusy, setImportBusy] = useState(false);
@@ -17,6 +18,18 @@ export default function DroneLocator() {
   const [match, setMatch] = useState<PanelMatch | null>(null);
   const [manualLat, setManualLat] = useState('');
   const [manualLon, setManualLon] = useState('');
+  const [dmsText, setDmsText] = useState('');
+  const [dmsError, setDmsError] = useState<string | null>(null);
+
+  function runDmsLookup() {
+    setDmsError(null);
+    const parsed = parseDMS(dmsText);
+    if (!parsed) {
+      setDmsError("Couldn't read that as degrees/minutes/seconds -- make sure it includes N/S and E/W, e.g. 26°55'15.5\"S 150°34'48.0\"E");
+      return;
+    }
+    runLookup(parsed.lat, parsed.lon);
+  }
 
   async function refreshPicaTotal() {
     setPicaTotal(await db.trackerPicas.count());
@@ -109,7 +122,27 @@ export default function DroneLocator() {
           />
         </label>
 
-        <div className="mb-2 mt-2 text-xs text-slate-500">or type coordinates directly (e.g. from an external company's list):</div>
+        <div className="mb-2 mt-2 text-xs text-slate-500">
+          or paste the coordinate straight from Google Maps (degrees/minutes/seconds -- no manual conversion needed):
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <input
+            value={dmsText}
+            onChange={(e) => setDmsText(e.target.value)}
+            placeholder={'e.g. 26°55\'15.5"S 150°34\'48.0"E'}
+            className="flex-1 rounded-lg border border-border bg-bg px-3 py-2 text-sm text-slate-100"
+          />
+          <button
+            onClick={runDmsLookup}
+            disabled={!dmsText}
+            className="rounded-lg bg-accent-teal px-4 py-2 text-sm font-semibold text-bg-panel disabled:opacity-40"
+          >
+            Find
+          </button>
+        </div>
+        {dmsError && <div className="mt-2 text-xs text-status-pending">{dmsError}</div>}
+
+        <div className="mb-2 mt-3 text-xs text-slate-500">or type plain decimal coordinates (e.g. from an external company's list):</div>
         <div className="flex flex-wrap gap-2">
           <input
             value={manualLat}

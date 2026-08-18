@@ -72,3 +72,33 @@ export function distanceMetres(a: LatLon, b: LatLon): number {
   const s = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * Math.sin(dLon / 2) ** 2;
   return 2 * R * Math.asin(Math.sqrt(s));
 }
+
+/**
+ * Parses a degrees/minutes/seconds coordinate pasted straight from Google Maps (e.g.
+ * `26°55'15.5"S 150°34'48.0"E`), so nobody has to hand-convert DMS to decimal degrees --
+ * manual conversion is exactly the kind of arithmetic slip that can land you tens of metres
+ * off, which on a ~65m tracker row is the difference between "near the DC box" and "smack in
+ * the middle". Tolerant of extra spaces, a comma between the two parts, and either ° ' " or
+ * plain space as separators. Returns null if it doesn't look like DMS at all -- callers should
+ * fall back to trying it as plain decimal degrees.
+ */
+export function parseDMS(text: string): LatLon | null {
+  const part = /(\d{1,3})[°\s]+(\d{1,2})['\s]+([\d.]+)["\s]*([NSEWnsew])/g;
+  const matches = [...text.matchAll(part)];
+  if (matches.length < 2) return null;
+
+  let lat: number | null = null;
+  let lon: number | null = null;
+  for (const m of matches) {
+    const deg = Number(m[1]);
+    const min = Number(m[2]);
+    const sec = Number(m[3]);
+    const hemi = m[4].toUpperCase();
+    const value = deg + min / 60 + sec / 3600;
+    const signed = hemi === 'S' || hemi === 'W' ? -value : value;
+    if (hemi === 'N' || hemi === 'S') lat = signed;
+    else lon = signed;
+  }
+  if (lat === null || lon === null) return null;
+  return { lat, lon };
+}
