@@ -2,8 +2,8 @@ import * as XLSX from 'xlsx';
 import { db } from './db';
 import type { TrackerPica } from './db';
 import { utmToLatLon, distanceMetres, type LatLon } from './utm';
-import { loadBlockGeometry } from './geometry';
-import { parseStringCode } from './locationCode';
+import { loadBlockGeometry, type GeometryString } from './geometry';
+import { parseStringCode, type StringCodeParts } from './locationCode';
 
 // Confirmed by cross-checking the survey file's own easting/northing against Edenvale's known
 // public location (see utm.ts) -- change if a future project's survey uses a different zone.
@@ -34,21 +34,22 @@ function positionFromDistance(distanceM: number): number {
 }
 
 
-// Which of the row's two strings (index 1 or 2) sits nearest the DC box -- i.e. covers combined
-// positions 1-28 vs 29-56. Confirmed by 4 real field tests across 2 different trackers on
-// BOTH sides of the road (block 4 tracker 016, and one more tracker on the South side) --
-// consistently the OPPOSITE of what an earlier single-example guess assumed: string index 1
-// is the DC-box-near half, string index 2 is the far half, the same way on both North and
-// South side trackers (this doesn't flip with side -- only the module numbering direction
-// does, via the North/South pica flip elsewhere in this file).
-const NEAR_DC_BOX_STRING_INDEX: number = 1;
-
-function stringIndexAndModule(position: number): { stringIndex: number; module: number } {
-  const inFirstHalf = position <= 28;
-  const stringIndex = inFirstHalf ? NEAR_DC_BOX_STRING_INDEX : NEAR_DC_BOX_STRING_INDEX === 2 ? 1 : 2;
-  const module = inFirstHalf ? position : position - 28;
-  return { stringIndex, module };
+// Which of a row's two strings sits nearest the DC box -- confirmed by 4 real field tests
+// across 2 different trackers on BOTH sides of the road: the LOWER-numbered of the two always
+// covers the DC-box-near half (combined positions 1-28), the higher-numbered one the far half
+// (29-56) -- the same way on both North and South side trackers (this doesn't flip with side --
+// only the module numbering direction does, via the North/South pica flip elsewhere in this
+// file). IMPORTANT: the two string numbers for a given (tracker, row) are NOT always literally
+// "1" and "2" -- they're whatever position that (tracker, row) happens to fall at within its
+// arrayBus's own string count, e.g. block 7 tracker 028's R4 row uses strings 5 and 6
+// (S-7.2.12.1.5 / .1.6), not 1/2. So this is relative (lower vs higher of whichever two numbers
+// actually exist for this row), never a comparison against a literal constant.
+function halfAndModule(position: number): { nearHalf: boolean; module: number } {
+  const nearHalf = position <= 28;
+  const module = nearHalf ? position : position - 28;
+  return { nearHalf, module };
 }
+
 
 export interface PicaImportRow {
   block: number;
@@ -246,20 +247,33 @@ export async function findNearestPanel(query: LatLon): Promise<PanelMatch | null
       const rows = [...trackerGeo.rows].sort();
       const row = rows.length === 1 ? rows[0] : best.pica.isMotorRow ? rows[0] : rows[1];
       match.row = row;
-      const { stringIndex, module } = stringIndexAndModule(combinedPosition);
-      match.position = module;
-      const stringEntry = geometry.strings.find((s) => {
-        if (s.t !== String(best!.pica.tracker).padStart(3, '0') || s.r !== row) return false;
+
+      // Find BOTH of this row's strings and sort by their actual string number -- never
+      // assume it's literally "1" and "2" (see halfAndModule's note: block 7 tracker 028's R4
+      // uses 5 and 6). Lower number = nearer the DC box, confirmed by 4 real field tests.
+      const trackerNumStr = String(best.pica.tracker).padStart(3, '0');
+      const rowStrings: { raw: GeometryString; parts: StringCodeParts }[] = [];
+      for (const s of geometry.strings) {
+        if (s.t !== trackerNumStr || s.r !== row) continue;
         const parts = parseStringCode(s.n);
-        return parts?.string === stringIndex;
-      });
-      if (stringEntry) {
-        const parts = parseStringCode(stringEntry.n);
-        if (parts) {
-          match.locationId = `${parts.block}.${parts.inverter}.${parts.dcBox}.${parts.arrayBus}.${parts.string}.${module}`;
-          const panel = await db.panels.get(match.locationId);
-          if (panel) match.serialNumber = panel.serialNumber;
-        }
+        if (parts) rowStrings.push({ raw: s, parts });
+      }
+      rowStrings.sort((a, b) => a.parts.string - b.parts.string);
+
+      function resolvePanel(position: number): { locationId: string; serialNumber?: string } | null {
+        const { nearHalf, module } = halfAndModule(position);
+        const entry = nearHalf ? rowStrings[0] : rowStrings[1];
+        if (!entry) return null;
+        const p = entry.parts;
+        return { locationId: `${p.block}.${p.inverter}.${p.dcBox}.${p.arrayBus}.${p.string}.${module}`, serialNumber: undefined };
+      }
+
+      const main = resolvePanel(combinedPosition);
+      if (main) {
+        match.position = halfAndModule(combinedPosition).module;
+        match.locationId = main.locationId;
+        const panel = await db.panels.get(main.locationId);
+        if (panel) match.serialNumber = panel.serialNumber;
       }
 
       // A drone photo's GPS is rarely survey-grade (a few metres of error is typical without
@@ -272,18 +286,10 @@ export async function findNearestPanel(query: LatLon): Promise<PanelMatch | null
         if (offset === 0) continue;
         const neighborCombined = combinedPosition + offset;
         if (neighborCombined < 1 || neighborCombined > PANELS_PER_ROW) continue;
-        const { stringIndex: nStringIndex, module: nModule } = stringIndexAndModule(neighborCombined);
-        const nStringEntry = geometry.strings.find((s) => {
-          if (s.t !== String(best!.pica.tracker).padStart(3, '0') || s.r !== row) return false;
-          const parts = parseStringCode(s.n);
-          return parts?.string === nStringIndex;
-        });
-        if (!nStringEntry) continue;
-        const nParts = parseStringCode(nStringEntry.n);
-        if (!nParts) continue;
-        const nLocationId = `${nParts.block}.${nParts.inverter}.${nParts.dcBox}.${nParts.arrayBus}.${nParts.string}.${nModule}`;
-        const nPanel = await db.panels.get(nLocationId);
-        candidates.push({ locationId: nLocationId, serialNumber: nPanel?.serialNumber, offset });
+        const n = resolvePanel(neighborCombined);
+        if (!n) continue;
+        const nPanel = await db.panels.get(n.locationId);
+        candidates.push({ locationId: n.locationId, serialNumber: nPanel?.serialNumber, offset });
       }
       match.nearbyCandidates = candidates.sort((a, b) => a.offset - b.offset);
     }
