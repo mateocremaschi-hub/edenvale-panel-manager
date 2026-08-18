@@ -17,11 +17,13 @@ const UTM_SOUTHERN = true;
 const PANELS_PER_ROW = 56;
 
 // Which of the row's two strings (index 1 or 2) sits nearest the DC box -- i.e. covers combined
-// positions 1-28 vs 29-56 -- confirmed against ONE real field example (block 4 tracker 016:
-// standing at module 2 of 56, closest to the DC box, matched string index 2). Worth re-
-// confirming against 1-2 more real examples from other blocks before fully trusting this is
-// the same for every tracker in the farm, same caution as the North/South DC-box rule.
-const NEAR_DC_BOX_STRING_INDEX = 2;
+// positions 1-28 vs 29-56. Confirmed by 4 real field tests across 2 different trackers on
+// BOTH sides of the road (block 4 tracker 016, and one more tracker on the South side) --
+// consistently the OPPOSITE of what an earlier single-example guess assumed: string index 1
+// is the DC-box-near half, string index 2 is the far half, the same way on both North and
+// South side trackers (this doesn't flip with side -- only the module numbering direction
+// does, via the North/South pica flip elsewhere in this file).
+const NEAR_DC_BOX_STRING_INDEX: number = 1;
 
 function stringIndexAndModule(position: number): { stringIndex: number; module: number } {
   const inFirstHalf = position <= 28;
@@ -123,7 +125,7 @@ function interpolate(pica: TrackerPica, position: number, total: number): LatLon
  * along-track distance combined -- simple equirectangular flattening (fine at farm scale, a
  * few km across at most) rather than full geodesic math, since we only need relative
  * distances to rank candidates, not absolute precision beyond a metre or so. */
-function closestPointOnSegment(query: LatLon, pica: TrackerPica): { t: number; distanceM: number } {
+function closestPointOnSegment(query: LatLon, pica: TrackerPica): { t: number; distanceM: number; segmentLengthM: number } {
   const refLat = (pica.northLat * Math.PI) / 180;
   const mPerDegLat = 111320;
   const mPerDegLon = 111320 * Math.cos(refLat);
@@ -138,7 +140,7 @@ function closestPointOnSegment(query: LatLon, pica: TrackerPica): { t: number; d
   t = Math.max(0, Math.min(1, t));
   const closest = { x: n.x + dx * t, y: n.y + dy * t };
   const distanceM = Math.hypot(q.x - closest.x, q.y - closest.y);
-  return { t, distanceM };
+  return { t, distanceM, segmentLengthM: Math.hypot(dx, dy) };
 }
 
 export interface PanelMatch {
@@ -150,6 +152,14 @@ export interface PanelMatch {
   serialNumber?: string;
   row?: string; // e.g. "R4" -- which physical row this was, once resolved
   positionUnconfirmed?: boolean; // geometry unavailable -- couldn't apply the North/South flip or string split
+  debug: {
+    isMotorRow: boolean;
+    t: number; // 0 = north pica, 1 = south pica, along the matched row's line
+    rawPosition: number; // 1-56, north-pica=1 assumption, before any side flip
+    combinedPosition: number; // 1-56, after the North/South flip
+    side?: 'North' | 'South';
+    segmentLengthM: number;
+  };
 }
 
 /**
@@ -165,10 +175,10 @@ export async function findNearestPanel(query: LatLon): Promise<PanelMatch | null
   const picas = await db.trackerPicas.toArray();
   if (picas.length === 0) return null;
 
-  let best: { pica: TrackerPica; t: number; distanceM: number } | null = null;
+  let best: { pica: TrackerPica; t: number; distanceM: number; segmentLengthM: number } | null = null;
   for (const pica of picas) {
-    const { t, distanceM } = closestPointOnSegment(query, pica);
-    if (!best || distanceM < best.distanceM) best = { pica, t, distanceM };
+    const { t, distanceM, segmentLengthM } = closestPointOnSegment(query, pica);
+    if (!best || distanceM < best.distanceM) best = { pica, t, distanceM, segmentLengthM };
   }
   if (!best) return null;
 
@@ -181,6 +191,13 @@ export async function findNearestPanel(query: LatLon): Promise<PanelMatch | null
     tracker: best.pica.tracker,
     position: combinedPosition,
     distanceM: best.distanceM,
+    debug: {
+      isMotorRow: best.pica.isMotorRow,
+      t: best.t,
+      rawPosition,
+      combinedPosition,
+      segmentLengthM: best.segmentLengthM,
+    },
   };
 
   // Resolve the exact string/location code via that block's geometry, using rules confirmed
@@ -201,6 +218,8 @@ export async function findNearestPanel(query: LatLon): Promise<PanelMatch | null
     const trackerGeo = geometry?.trackers[trackerKey];
     if (trackerGeo) {
       if (trackerGeo.side === 'North') combinedPosition = PANELS_PER_ROW + 1 - rawPosition;
+      match.debug.combinedPosition = combinedPosition;
+      match.debug.side = trackerGeo.side;
 
       const rows = [...trackerGeo.rows].sort();
       const row = rows.length === 1 ? rows[0] : best.pica.isMotorRow ? rows[0] : rows[1];

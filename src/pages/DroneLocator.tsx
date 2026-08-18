@@ -198,6 +198,16 @@ export default function DroneLocator() {
               </div>
             )}
             <div className="mt-2 text-xs text-slate-500">Match confidence: ~{match.distanceM.toFixed(1)}m from the estimated panel position.</div>
+            <details className="mt-2 text-xs text-slate-500">
+              <summary className="cursor-pointer">Show calculation details</summary>
+              <div className="mt-1 space-y-0.5 font-mono">
+                <div>Matched row: {match.debug.isMotorRow ? 'motor (survey)' : 'slave (survey)'}, side: {match.debug.side ?? 'unknown'}</div>
+                <div>t along pica line (0=north pica, 1=south pica): {match.debug.t.toFixed(4)}</div>
+                <div>Pica-to-pica segment length: {match.debug.segmentLengthM.toFixed(1)}m</div>
+                <div>Raw position (north-pica=1, 1-56): {match.debug.rawPosition}</div>
+                <div>Combined position after N/S flip (1-56): {match.debug.combinedPosition}</div>
+              </div>
+            </details>
           </div>
         )}
       </section>
