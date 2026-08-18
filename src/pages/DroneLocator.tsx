@@ -139,7 +139,8 @@ export default function DroneLocator() {
             <div className="text-sm text-slate-300">
               Block <span className="font-semibold text-slate-100">{match.block}</span>, Tracker{' '}
               <span className="font-semibold text-slate-100">{match.tracker}</span>
-              {match.row && <> ({match.row})</>}, position <span className="font-semibold text-slate-100">{match.position}</span> of 28
+              {match.row && <> ({match.row})</>}, module <span className="font-semibold text-slate-100">{match.position}</span>{' '}
+              {match.locationId ? 'of 28' : '(of 56 along the row -- string not resolved yet)'}
             </div>
             {match.positionUnconfirmed && (
               <div className="mt-1 text-xs text-status-pending">

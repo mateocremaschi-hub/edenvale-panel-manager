@@ -10,7 +10,25 @@ import { parseStringCode } from './locationCode';
 const UTM_ZONE = 56;
 const UTM_SOUTHERN = true;
 
-const PANELS_PER_ROW = 28; // one string's worth -- matches every tracker row at Edenvale
+// A tracker ROW (e.g. "R2") spans 56 panels, not 28 -- confirmed both by the farm's own CONF
+// sheet (n_modules_along_tracker: 56) and by the geometry data: every (tracker, row) pair has
+// exactly 2 strings (e.g. R2 has strings ...7.1.1 and ...7.1.2), each 28 modules, not one
+// string per row. A pica row's north-south line spans that full 56-panel width.
+const PANELS_PER_ROW = 56;
+
+// Which of the row's two strings (index 1 or 2) sits nearest the DC box -- i.e. covers combined
+// positions 1-28 vs 29-56 -- confirmed against ONE real field example (block 4 tracker 016:
+// standing at module 2 of 56, closest to the DC box, matched string index 2). Worth re-
+// confirming against 1-2 more real examples from other blocks before fully trusting this is
+// the same for every tracker in the farm, same caution as the North/South DC-box rule.
+const NEAR_DC_BOX_STRING_INDEX = 2;
+
+function stringIndexAndModule(position: number): { stringIndex: number; module: number } {
+  const inFirstHalf = position <= 28;
+  const stringIndex = inFirstHalf ? NEAR_DC_BOX_STRING_INDEX : NEAR_DC_BOX_STRING_INDEX === 2 ? 1 : 2;
+  const module = inFirstHalf ? position : position - 28;
+  return { stringIndex, module };
+}
 
 export interface PicaImportRow {
   block: number;
@@ -126,20 +144,21 @@ function closestPointOnSegment(query: LatLon, pica: TrackerPica): { t: number; d
 export interface PanelMatch {
   block: number;
   tracker: number;
-  position: number;
+  position: number; // module 1-28 within its string, once resolved (else the raw 1-56 row position)
   distanceM: number;
   locationId?: string; // resolved once the block's geometry + string mapping is loaded
   serialNumber?: string;
   row?: string; // e.g. "R4" -- which physical row this was, once resolved
-  positionUnconfirmed?: boolean; // geometry unavailable -- couldn't apply the North/South flip
+  positionUnconfirmed?: boolean; // geometry unavailable -- couldn't apply the North/South flip or string split
 }
 
 /**
  * Finds the tracker row whose north-south line the query point sits closest to, then the
- * nearest of its 28 interpolated panel positions along that line. Two-pass: the first pass
- * only touches trackerPicas (fast, no per-block geometry needed) to find the single best
- * (block, tracker, row) by raw distance; only THEN is that one block's geometry loaded to
- * resolve the exact location code, current panel, AND the true module-1 direction -- not
+ * nearest of its 56 interpolated panel positions along that row (a row like "R2" has TWO
+ * strings of 28 modules each, not one -- see PANELS_PER_ROW). Two-pass: the first pass only
+ * touches trackerPicas (fast, no per-block geometry needed) to find the single best (block,
+ * tracker, row) by raw distance; only THEN is that one block's geometry loaded to resolve the
+ * exact string, module, location code, current panel, and the true module-1 direction -- not
  * every candidate block, just the winner.
  */
 export async function findNearestPanel(query: LatLon): Promise<PanelMatch | null> {
@@ -153,44 +172,50 @@ export async function findNearestPanel(query: LatLon): Promise<PanelMatch | null
   }
   if (!best) return null;
 
-  // Raw position treating the north pica as position 1 -- only actually correct for
+  // Raw position (1-56) treating the north pica as position 1 -- only actually correct for
   // South-side trackers (see the flip below).
   const rawPosition = Math.max(1, Math.min(PANELS_PER_ROW, Math.round(best.t * (PANELS_PER_ROW - 1)) + 1));
-  let position = rawPosition;
+  let combinedPosition = rawPosition;
   const match: PanelMatch = {
     block: best.pica.block,
     tracker: best.pica.tracker,
-    position,
+    position: combinedPosition,
     distanceM: best.distanceM,
   };
 
-  // Resolve the exact string/location code via that block's geometry, using two rules
-  // confirmed by the user: (1) within a paired tracker, the MOTOR row is always the
-  // numerically-lower row label (R2 motor pairs with R3 slave; R4 motor pairs with R5
-  // slave) -- a single-row tracker (R1) has no pairing at all. (2) DC boxes sit in the
-  // access road between the North and South sets of trackers, so module 1 (always nearest
-  // THAT string's own DC box) is at the SOUTH end for North-side trackers, but at the NORTH
-  // end for South-side trackers -- the two sets face the same middle road from opposite
-  // sides. Concretely: the north pica sits near module 28 on a North-side tracker, but near
-  // module 1 on a South-side tracker -- so North-side trackers need the raw (north-pica=1)
-  // position flipped; South-side trackers use it as-is.
+  // Resolve the exact string/location code via that block's geometry, using rules confirmed
+  // by the user: (1) within a paired tracker, the MOTOR row is always the numerically-lower
+  // row label (R2 motor pairs with R3 slave; R4 motor pairs with R5 slave) -- a single-row
+  // tracker (R1) has no pairing at all. (2) DC boxes sit in the access road between the North
+  // and South sets of trackers, so module 1 (always nearest THAT string's own DC box) is at
+  // the SOUTH end for North-side trackers, but at the NORTH end for South-side trackers --
+  // the two sets face the same middle road from opposite sides. Concretely: the north pica
+  // sits near combined-position 56 on a North-side tracker, but near combined-position 1 on
+  // a South-side tracker -- so North-side trackers need the raw (north-pica=1) position
+  // flipped; South-side trackers use it as-is. (3) of the row's two strings, whichever is
+  // closer to the DC box covers combined positions 1-28 (see NEAR_DC_BOX_STRING_INDEX).
   try {
     const blockStr = String(best.pica.block).padStart(2, '0');
     const geometry = await loadBlockGeometry(best.pica.block);
     const trackerKey = `${blockStr}-${String(best.pica.tracker).padStart(3, '0')}`;
     const trackerGeo = geometry?.trackers[trackerKey];
     if (trackerGeo) {
-      if (trackerGeo.side === 'North') position = PANELS_PER_ROW + 1 - rawPosition;
-      match.position = position;
+      if (trackerGeo.side === 'North') combinedPosition = PANELS_PER_ROW + 1 - rawPosition;
 
       const rows = [...trackerGeo.rows].sort();
       const row = rows.length === 1 ? rows[0] : best.pica.isMotorRow ? rows[0] : rows[1];
       match.row = row;
-      const stringEntry = geometry.strings.find((s) => s.t === String(best!.pica.tracker).padStart(3, '0') && s.r === row);
+      const { stringIndex, module } = stringIndexAndModule(combinedPosition);
+      match.position = module;
+      const stringEntry = geometry.strings.find((s) => {
+        if (s.t !== String(best!.pica.tracker).padStart(3, '0') || s.r !== row) return false;
+        const parts = parseStringCode(s.n);
+        return parts?.string === stringIndex;
+      });
       if (stringEntry) {
         const parts = parseStringCode(stringEntry.n);
         if (parts) {
-          match.locationId = `${parts.block}.${parts.inverter}.${parts.dcBox}.${parts.arrayBus}.${parts.string}.${position}`;
+          match.locationId = `${parts.block}.${parts.inverter}.${parts.dcBox}.${parts.arrayBus}.${parts.string}.${module}`;
           const panel = await db.panels.get(match.locationId);
           if (panel) match.serialNumber = panel.serialNumber;
         }
