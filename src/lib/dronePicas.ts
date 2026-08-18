@@ -170,10 +170,25 @@ export async function pushTrackerPicas(records?: TrackerPica[]): Promise<number>
 export async function pullTrackerPicas(): Promise<number> {
   const supabase = getSupabase();
   if (!supabase) return 0;
-  const { data, error } = await supabase.from('tracker_picas').select('*');
-  if (error) throw new Error(`Downloading tracker picas failed: ${error.message}`);
-  if (!data || data.length === 0) return 0;
-  const records: TrackerPica[] = data.map((r: Record<string, unknown>) => ({
+
+  // Supabase caps an unpaginated select('*') at 1000 rows by default -- with all 36 blocks
+  // this table can hold several thousand, so a single unpaginated call silently truncated to
+  // whichever 1000 rows happened to come back first, missing entire blocks. Page through in
+  // batches of 1000 (same pattern as pullLocationsAndPanels) until a batch comes back short.
+  const BATCH = 1000;
+  let from = 0;
+  const allRows: Record<string, unknown>[] = [];
+  for (;;) {
+    const { data, error } = await supabase.from('tracker_picas').select('*').range(from, from + BATCH - 1);
+    if (error) throw new Error(`Downloading tracker picas failed: ${error.message}`);
+    if (!data || data.length === 0) break;
+    allRows.push(...data);
+    if (data.length < BATCH) break;
+    from += BATCH;
+  }
+  if (allRows.length === 0) return 0;
+
+  const records: TrackerPica[] = allRows.map((r) => ({
     id: r.id as string,
     block: r.block as number,
     tracker: r.tracker as number,
@@ -250,7 +265,14 @@ export interface PanelMatch {
  * exact string, module, location code, current panel, and the true module-1 direction -- not
  * every candidate block, just the winner.
  */
-export async function findNearestPanel(query: LatLon): Promise<PanelMatch | null> {
+export interface NoNearbyMatch {
+  noNearbyData: true;
+  closestDistanceM: number;
+  closestBlock: number;
+  closestTracker: number;
+}
+
+export async function findNearestPanel(query: LatLon): Promise<PanelMatch | NoNearbyMatch | null> {
   const picas = await db.trackerPicas.toArray();
   if (picas.length === 0) return null;
 
@@ -260,6 +282,16 @@ export async function findNearestPanel(query: LatLon): Promise<PanelMatch | null
     if (!best || distanceM < best.distanceM) best = { pica, t, distanceM, segmentLengthM };
   }
   if (!best) return null;
+
+  // A real match should be within a few metres of some tracker's line -- GPS/pica survey
+  // error doesn't explain being hundreds of metres off. If the CLOSEST available line is still
+  // this far away, the real block/tracker simply isn't in the loaded pica data (a gap in
+  // coverage, not a plausible match) -- say so plainly instead of confidently naming the
+  // nearest-available block as if it were correct.
+  const MAX_PLAUSIBLE_DISTANCE_M = 30;
+  if (best.distanceM > MAX_PLAUSIBLE_DISTANCE_M) {
+    return { noNearbyData: true, closestDistanceM: best.distanceM, closestBlock: best.pica.block, closestTracker: best.pica.tracker };
+  }
 
   // Distance from the north pica along the row, in metres -- position comes from the real
   // panel pitch and pica offset (positionFromDistance), not from treating the whole pica-to-

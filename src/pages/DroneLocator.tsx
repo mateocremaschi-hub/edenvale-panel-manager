@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import * as exifr from 'exifr';
 import { db } from '@/lib/db';
 import { displaySerial } from '@/lib/panelDisplay';
-import { parsePicaExcelFile, importTrackerPicas, findNearestPanel, type PicaImportRow, type PanelMatch } from '@/lib/dronePicas';
+import { parsePicaExcelFile, importTrackerPicas, pushTrackerPicas, findNearestPanel, type PicaImportRow, type PanelMatch } from '@/lib/dronePicas';
 import { parseDMS } from '@/lib/utm';
 
 export default function DroneLocator() {
@@ -12,6 +12,21 @@ export default function DroneLocator() {
   const [importPreview, setImportPreview] = useState<PicaImportRow[] | null>(null);
   const [importCount, setImportCount] = useState<number | null>(null);
   const [picaTotal, setPicaTotal] = useState<number | null>(null);
+  const [pushBusy, setPushBusy] = useState(false);
+  const [pushResult, setPushResult] = useState<string | null>(null);
+
+  async function pushExistingPicas() {
+    setPushBusy(true);
+    setPushResult(null);
+    try {
+      const n = await pushTrackerPicas();
+      setPushResult(`✓ Uploaded ${n} row(s) to the shared server.`);
+    } catch (err) {
+      setPushResult(err instanceof Error ? `Failed: ${err.message}` : 'Failed to upload.');
+    } finally {
+      setPushBusy(false);
+    }
+  }
 
   const [lookupBusy, setLookupBusy] = useState(false);
   const [lookupError, setLookupError] = useState<string | null>(null);
@@ -73,6 +88,14 @@ export default function DroneLocator() {
       const result = await findNearestPanel({ lat, lon });
       if (!result) {
         setLookupError('No tracker GPS data loaded yet -- import the pica Excel first.');
+        return;
+      }
+      if ('noNearbyData' in result) {
+        setLookupError(
+          `Nothing loaded near this location -- the closest tracker data on file is block ${result.closestBlock}, ` +
+            `tracker ${result.closestTracker}, but that's ~${Math.round(result.closestDistanceM)}m away. ` +
+            `This block probably hasn't been imported yet.`
+        );
         return;
       }
       setMatch(result);
@@ -237,6 +260,22 @@ export default function DroneLocator() {
           {picaTotal !== null && picaTotal > 0 ? `${picaTotal} tracker row(s) loaded.` : 'No tracker GPS data loaded yet.'} Upload
           the drone survey Excel (pica1/pica2 north/south coordinates per tracker) to add more blocks.
         </p>
+        {picaTotal !== null && picaTotal > 0 && (
+          <div className="mb-3">
+            <button
+              onClick={pushExistingPicas}
+              disabled={pushBusy}
+              className="rounded-lg border border-border px-4 py-2 text-xs font-semibold text-slate-300 disabled:opacity-40"
+            >
+              {pushBusy ? 'Uploading...' : `Push all ${picaTotal} row(s) to the shared server`}
+            </button>
+            <p className="mt-1 text-xs text-slate-500">
+              Use this once if this data was imported before the shared sync existed -- new imports upload
+              automatically from now on.
+            </p>
+            {pushResult && <div className="mt-2 text-xs text-status-replaced">{pushResult}</div>}
+          </div>
+        )}
         {importError && <div className="mb-3 rounded-lg bg-status-pending/20 p-2 text-xs text-status-pending">{importError}</div>}
         {importCount !== null && (
           <div className="mb-3 rounded-lg bg-status-replaced/20 p-2 text-xs text-status-replaced">
