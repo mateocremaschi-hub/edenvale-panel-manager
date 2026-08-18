@@ -3,6 +3,7 @@ import { db } from './db';
 import { newId } from './id';
 import { nowIso } from './time';
 import { pushPanelsById, pullPanelsById } from './sync';
+import { pullTrackerPicas } from './dronePicas';
 import type { Issue, Replacement, ActivityEvent, Photo } from './types';
 
 // ---- local -> Supabase row mappers ----
@@ -298,6 +299,13 @@ export async function pullOperationalRecords(onStatus?: (text: string) => void):
 export async function syncOperationalRecords(onStatus?: (text: string) => void): Promise<OutboxSummary> {
   const pushed = await pushOutbox(onStatus);
   const pulled = await pullOperationalRecords(onStatus);
+  try {
+    onStatus?.('Downloading tracker GPS data...');
+    await pullTrackerPicas();
+  } catch (err) {
+    // Don't fail the whole sync cycle over this -- GPS lookup is a bonus feature, not core.
+    console.error('Downloading tracker picas failed:', err);
+  }
   return {
     pushedIssues: pushed.issues,
     pushedReplacements: pushed.replacements,

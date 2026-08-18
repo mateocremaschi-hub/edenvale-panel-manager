@@ -1,6 +1,7 @@
 import * as XLSX from 'xlsx';
 import { db } from './db';
 import type { TrackerPica } from './db';
+import { getSupabase } from './supabase';
 import { utmToLatLon, distanceMetres, type LatLon } from './utm';
 import { loadBlockGeometry, type GeometryString } from './geometry';
 import { parseStringCode, type StringCodeParts } from './locationCode';
@@ -123,6 +124,64 @@ export async function importTrackerPicas(rows: PicaImportRow[]): Promise<number>
     northLon: r.north.lon,
     southLat: r.south.lat,
     southLon: r.south.lon,
+  }));
+  await db.trackerPicas.bulkPut(records);
+  // Push to the shared server right away, so every other device picks this up on its next
+  // sync (every ~3 minutes while online, or right away if the person taps "Sync now") without
+  // anyone else needing to import the same Excel themselves.
+  try {
+    await pushTrackerPicas(records);
+  } catch (err) {
+    console.error('Pushing tracker picas failed (will retry on next sync):', err);
+  }
+  return records.length;
+}
+
+/** Uploads tracker pica rows to the shared server. Called automatically right after a local
+ * import, and safe to call again later (e.g. from the regular sync cycle) -- upserts by id. */
+export async function pushTrackerPicas(records?: TrackerPica[]): Promise<number> {
+  const supabase = getSupabase();
+  if (!supabase) return 0;
+  const rows = records ?? (await db.trackerPicas.toArray());
+  if (rows.length === 0) return 0;
+  const payload = rows.map((r) => ({
+    id: r.id,
+    block: r.block,
+    tracker: r.tracker,
+    is_motor_row: r.isMotorRow,
+    north_lat: r.northLat,
+    north_lon: r.northLon,
+    south_lat: r.southLat,
+    south_lon: r.southLon,
+  }));
+  // Supabase upsert has a practical row-count cap per request -- batch defensively even
+  // though this table is small (at most ~36 blocks x ~190 rows).
+  for (let i = 0; i < payload.length; i += 1000) {
+    const { error } = await supabase.from('tracker_picas').upsert(payload.slice(i, i + 1000));
+    if (error) throw new Error(`Uploading tracker picas failed: ${error.message}`);
+  }
+  return rows.length;
+}
+
+/** Downloads every tracker pica row from the shared server -- small table (a few thousand
+ * rows even with all 36 blocks), so a full pull each time is simple and cheap enough, same
+ * pattern as issues/replacements. Called automatically by the regular sync cycle so a
+ * technician who never ran the Excel import still sees GPS lookup work. */
+export async function pullTrackerPicas(): Promise<number> {
+  const supabase = getSupabase();
+  if (!supabase) return 0;
+  const { data, error } = await supabase.from('tracker_picas').select('*');
+  if (error) throw new Error(`Downloading tracker picas failed: ${error.message}`);
+  if (!data || data.length === 0) return 0;
+  const records: TrackerPica[] = data.map((r: Record<string, unknown>) => ({
+    id: r.id as string,
+    block: r.block as number,
+    tracker: r.tracker as number,
+    isMotorRow: r.is_motor_row as boolean,
+    northLat: r.north_lat as number,
+    northLon: r.north_lon as number,
+    southLat: r.south_lat as number,
+    southLon: r.south_lon as number,
   }));
   await db.trackerPicas.bulkPut(records);
   return records.length;
