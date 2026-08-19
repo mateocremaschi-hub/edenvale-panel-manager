@@ -232,42 +232,56 @@ export async function pushOutbox(onStatus?: (text: string) => void): Promise<{ i
 /** Downloads every issue/replacement/activity-event/photo from Supabase into this device's
  * local cache. These tables stay small (hundreds-thousands of rows even after years of
  * use), so a full pull each time is simpler and cheap enough -- no incremental logic needed. */
+/** Supabase caps an unpaginated select('*') at 1000 rows by default -- these tables all grow
+ * over time (every report, replacement, activity event, and photo ever logged), so a single
+ * unpaginated call would silently start truncating once any of them crossed that line. Pages
+ * through in batches of 1000 until a batch comes back short, same pattern already used for
+ * pullLocationsAndPanels (the panels table) and pullTrackerPicas. */
+async function fetchAllRows(supabase: NonNullable<ReturnType<typeof getSupabase>>, table: string): Promise<Record<string, unknown>[]> {
+  const BATCH = 1000;
+  let from = 0;
+  const all: Record<string, unknown>[] = [];
+  for (;;) {
+    const { data, error } = await supabase.from(table).select('*').range(from, from + BATCH - 1);
+    if (error) throw new Error(`Downloading ${table} failed: ${error.message}`);
+    if (!data || data.length === 0) break;
+    all.push(...data);
+    if (data.length < BATCH) break;
+    from += BATCH;
+  }
+  return all;
+}
+
 export async function pullOperationalRecords(onStatus?: (text: string) => void): Promise<{ issues: number; replacements: number; events: number; photos: number }> {
   const supabase = getSupabase();
   if (!supabase) throw new Error('Supabase is not configured.');
 
   onStatus?.('Downloading reports...');
-  const { data: issueRows, error: issueErr } = await supabase.from('issues').select('*');
-  if (issueErr) throw new Error(`Downloading reports failed: ${issueErr.message}`);
-  if (issueRows && issueRows.length > 0) await db.issues.bulkPut(issueRows.map(rowToIssue));
-  await deleteLocallyIfGoneRemotely(db.issues, 'issueId', (issueRows ?? []).map((r) => r.issue_id));
+  const issueRows = (await fetchAllRows(supabase, 'issues')) as any[];
+  if (issueRows.length > 0) await db.issues.bulkPut(issueRows.map(rowToIssue));
+  await deleteLocallyIfGoneRemotely(db.issues, 'issueId', issueRows.map((r) => r.issue_id));
 
   onStatus?.('Downloading replacements...');
-  const { data: replRows, error: replErr } = await supabase.from('replacements').select('*');
-  if (replErr) throw new Error(`Downloading replacements failed: ${replErr.message}`);
-  if (replRows && replRows.length > 0) await db.replacements.bulkPut(replRows.map(rowToReplacement));
-  await deleteLocallyIfGoneRemotely(db.replacements, 'replacementId', (replRows ?? []).map((r) => r.replacement_id));
+  const replRows = (await fetchAllRows(supabase, 'replacements')) as any[];
+  if (replRows.length > 0) await db.replacements.bulkPut(replRows.map(rowToReplacement));
+  await deleteLocallyIfGoneRemotely(db.replacements, 'replacementId', replRows.map((r) => r.replacement_id));
 
-  const touchedPanelIds = [
-    ...new Set<string>([...(issueRows ?? []).map((r) => r.panel_id_at_report), ...(replRows ?? []).map((r) => r.installed_panel_id)]),
-  ];
+  const touchedPanelIds = [...new Set<string>([...issueRows.map((r) => r.panel_id_at_report), ...replRows.map((r) => r.installed_panel_id)])];
   if (touchedPanelIds.length > 0) {
     onStatus?.('Syncing panel status...');
     await pullPanelsById(touchedPanelIds);
   }
 
   onStatus?.('Downloading activity history...');
-  const { data: eventRows, error: eventErr } = await supabase.from('activity_events').select('*');
-  if (eventErr) throw new Error(`Downloading activity history failed: ${eventErr.message}`);
-  if (eventRows && eventRows.length > 0) await db.activityEvents.bulkPut(eventRows.map(rowToEvent));
-  await deleteLocallyIfGoneRemotely(db.activityEvents, 'eventId', (eventRows ?? []).map((r) => r.event_id));
+  const eventRows = (await fetchAllRows(supabase, 'activity_events')) as any[];
+  if (eventRows.length > 0) await db.activityEvents.bulkPut(eventRows.map(rowToEvent));
+  await deleteLocallyIfGoneRemotely(db.activityEvents, 'eventId', eventRows.map((r) => r.event_id));
 
   onStatus?.('Downloading photos...');
-  const { data: photoRows, error: photoErr } = await supabase.from('photos').select('*');
-  if (photoErr) throw new Error(`Downloading photo list failed: ${photoErr.message}`);
-  await deleteLocallyIfGoneRemotely(db.photos, 'photoId', (photoRows ?? []).map((r) => r.photo_id));
+  const photoRows = (await fetchAllRows(supabase, 'photos')) as any[];
+  await deleteLocallyIfGoneRemotely(db.photos, 'photoId', photoRows.map((r) => r.photo_id));
   let pulledPhotos = 0;
-  for (const row of photoRows ?? []) {
+  for (const row of photoRows) {
     const existing = await db.photos.get(row.photo_id);
     if (existing) continue; // already have the blob locally, don't re-download
     const { data: blob, error: dlErr } = await supabase.storage.from('photos').download(row.storage_path);
@@ -287,9 +301,9 @@ export async function pullOperationalRecords(onStatus?: (text: string) => void):
   }
 
   return {
-    issues: issueRows?.length ?? 0,
-    replacements: replRows?.length ?? 0,
-    events: eventRows?.length ?? 0,
+    issues: issueRows.length,
+    replacements: replRows.length,
+    events: eventRows.length,
     photos: pulledPhotos,
   };
 }

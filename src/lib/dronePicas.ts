@@ -324,7 +324,7 @@ export async function findNearestPanel(query: LatLon): Promise<PanelMatch | NoNe
   // sits near combined-position 56 on a North-side tracker, but near combined-position 1 on
   // a South-side tracker -- so North-side trackers need the raw (north-pica=1) position
   // flipped; South-side trackers use it as-is. (3) of the row's two strings, whichever is
-  // closer to the DC box covers combined positions 1-28 (see NEAR_DC_BOX_STRING_INDEX).
+  // closer to the DC box covers combined positions 1-28 (see halfAndModule above).
   try {
     const blockStr = String(best.pica.block).padStart(2, '0');
     const geometry = await loadBlockGeometry(best.pica.block);

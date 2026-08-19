@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { sha256Hex } from '@/lib/hash';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { Link } from 'react-router-dom';
 import { db, clearPanelData, setDataSource } from '@/lib/db';
@@ -162,7 +163,14 @@ export default function Settings() {
   async function resetAllPanelData() {
     if (adminPin) {
       const entered = prompt('Enter admin PIN to reset all panel data:');
-      if (entered !== adminPin) {
+      if (entered == null) return;
+      // Accept the new hashed format or (one-time) the old plain-text format, quietly
+      // upgrading it to a hash so nobody gets locked out by this change.
+      if ((await sha256Hex(entered)) === adminPin) {
+        // ok
+      } else if (entered === adminPin) {
+        setAdminPin(await sha256Hex(entered));
+      } else {
         alert('Incorrect PIN.');
         return;
       }
@@ -256,7 +264,10 @@ export default function Settings() {
             placeholder={adminPin ? '••••' : 'No PIN set'}
             className="flex-1 rounded-lg border border-border bg-bg px-3 py-2 text-sm text-slate-100"
           />
-          <button onClick={() => setAdminPin(pin || null)} className="rounded-lg bg-accent-blue px-4 py-2 text-sm font-semibold text-white">
+          <button
+            onClick={async () => setAdminPin(pin ? await sha256Hex(pin) : null)}
+            className="rounded-lg bg-accent-blue px-4 py-2 text-sm font-semibold text-white"
+          >
             Save
           </button>
         </div>

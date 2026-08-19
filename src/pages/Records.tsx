@@ -9,6 +9,7 @@ const TABS: { key: PanelStatus | 'all'; label: string }[] = [
   { key: 'all', label: 'All panels' },
   { key: 'issue_reported', label: 'Open issues' },
   { key: 'pending_replacement', label: 'Pending replacement' },
+  { key: 'vacant', label: 'Vacant' },
   { key: 'replaced', label: 'Replaced' },
   { key: 'closed', label: 'Closed' },
 ];

@@ -66,8 +66,13 @@ export async function pushPanelsById(panelIds: string[]): Promise<void> {
   if (!supabase || panelIds.length === 0) return;
   const panels = (await db.panels.bulkGet(panelIds)).filter((p): p is Panel => !!p);
   if (panels.length === 0) return;
-  const { error } = await supabase.from('panels').upsert(panels.map(toSupaPanel), { onConflict: 'panel_id' });
-  if (error) throw new Error(`Updating panel status on server failed: ${error.message}`);
+  // Batch defensively -- this is normally called with a handful of touched panels per sync
+  // cycle, but a single very large upsert could hit Supabase's request-size limits.
+  const payload = panels.map(toSupaPanel);
+  for (let i = 0; i < payload.length; i += 500) {
+    const { error } = await supabase.from('panels').upsert(payload.slice(i, i + 500), { onConflict: 'panel_id' });
+    if (error) throw new Error(`Updating panel status on server failed: ${error.message}`);
+  }
 }
 
 /** Downloads a specific set of panels (by id) from Supabase into the local cache -- the
@@ -76,9 +81,15 @@ export async function pushPanelsById(panelIds: string[]): Promise<void> {
 export async function pullPanelsById(panelIds: string[]): Promise<void> {
   const supabase = getSupabase();
   if (!supabase || panelIds.length === 0) return;
-  const { data, error } = await supabase.from('panels').select('*').in('panel_id', panelIds);
-  if (error) throw new Error(`Downloading updated panels failed: ${error.message}`);
-  if (data && data.length > 0) await db.panels.bulkPut(data.map(fromSupaPanel));
+  // A plain .in('panel_id', panelIds) is still subject to Supabase's 1000-row response cap
+  // regardless of how many ids are being filtered on -- chunk the id list itself (well under
+  // 1000 per request) so a large touched-panel batch can never silently lose rows.
+  for (let i = 0; i < panelIds.length; i += 500) {
+    const chunk = panelIds.slice(i, i + 500);
+    const { data, error } = await supabase.from('panels').select('*').in('panel_id', chunk);
+    if (error) throw new Error(`Downloading updated panels failed: ${error.message}`);
+    if (data && data.length > 0) await db.panels.bulkPut(data.map(fromSupaPanel));
+  }
 }
 
 export interface SyncProgress {

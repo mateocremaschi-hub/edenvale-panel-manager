@@ -7,6 +7,7 @@ import { commitBatch, loadExistingPanelIndex, logImportEvent, newCommitStats, ty
 import { db, clearPanelData, setDataSource } from '@/lib/db';
 import { useSession } from '@/store/session';
 import { useSettings } from '@/store/settings';
+import { sha256Hex } from '@/lib/hash';
 
 type Step = 'pin' | 'select' | 'sheet' | 'header' | 'mapping' | 'confirmClear' | 'importing' | 'done';
 
@@ -78,10 +79,17 @@ export default function Import() {
     };
   }, []);
 
-  function checkPin() {
-    if (pinInput === adminPin) {
+  async function checkPin() {
+    // Accept either the new hashed format or (for anyone who set a PIN before this device
+    // upgraded) the old plain-text format -- and quietly upgrade it to a hash on first use so
+    // nobody gets locked out by this change.
+    if ((await sha256Hex(pinInput)) === adminPin) {
       setStep('select');
       setPinError(null);
+    } else if (pinInput === adminPin) {
+      setStep('select');
+      setPinError(null);
+      useSettings.getState().setAdminPin(await sha256Hex(pinInput));
     } else {
       setPinError('Incorrect PIN.');
     }

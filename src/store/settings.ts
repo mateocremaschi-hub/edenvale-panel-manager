@@ -4,7 +4,7 @@ import { activeProjectConfig } from './project';
 
 interface SettingsState {
   appName: string;
-  adminPin: string | null; // TODO(Etapa 7): hash before this leaves local dev
+  adminPin: string | null; // stores a SHA-256 hash (see lib/hash.ts), never the raw PIN
   voltageMin: number;
   voltageMax: number;
   setAppName: (name: string) => void;
