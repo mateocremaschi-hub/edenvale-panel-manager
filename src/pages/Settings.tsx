@@ -484,6 +484,9 @@ export default function Settings() {
           <Link to="/restore-master" className="inline-block rounded-lg border border-status-pending px-4 py-2 text-sm font-semibold text-status-pending">
             Restore panel data from master Excel
           </Link>
+          <Link to="/import-history" className="ml-2 inline-block rounded-lg border border-border px-4 py-2 text-sm font-semibold text-slate-300">
+            View import &amp; restore history
+          </Link>
         </div>
       </section>
 
