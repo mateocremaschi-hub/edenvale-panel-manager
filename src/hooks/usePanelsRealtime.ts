@@ -62,11 +62,48 @@ function isCompletePanelRow(r: unknown): r is SupaPanelRow {
  * happens, without waiting for the periodic sync or a manual "Sync now"/"Re-download". This is
  * purely additive: the existing pull-based sync (useAutoSync) still runs as-is, so anything
  * missed while offline (Realtime only works with an active connection) still gets caught up
- * normally once back online. Mount once, near the app root -- see App.tsx. */
+ * normally once back online. Mount once, near the app root -- see App.tsx.
+ *
+ * Batches incoming changes instead of applying each one immediately: a single bulk operation
+ * (a full "Push local data to Supabase", or a large historical Excel import) can generate
+ * hundreds of thousands of individual change events in a short burst. Applying each with its
+ * own db.panels.put() -- and letting every useLiveQuery-based screen (the Map, in particular,
+ * which iterates all 36 blocks) re-render on every single one -- froze the app in practice
+ * during exactly this kind of burst. Instead, incoming rows are buffered (de-duplicated by
+ * panelId, keeping only the latest version of each) and flushed together via one bulkPut()
+ * every 500ms -- still feels instant for the normal case (a single report or replacement), but
+ * collapses a flood of thousands of events into a handful of writes and re-renders. */
 export function usePanelsRealtime() {
   useEffect(() => {
     const supabase = getSupabase();
     if (!supabase) return;
+
+    let buffer = new Map<string, Panel>();
+    let flushTimer: ReturnType<typeof setTimeout> | null = null;
+    let flushing = false;
+
+    async function flush() {
+      flushTimer = null;
+      if (buffer.size === 0) return;
+      const toApply = Array.from(buffer.values());
+      buffer = new Map();
+      flushing = true;
+      try {
+        await db.panels.bulkPut(toApply);
+      } catch (err) {
+        console.error('Applying live panel updates failed:', err);
+      } finally {
+        flushing = false;
+        // More arrived while this flush was writing -- schedule another round rather than
+        // dropping them.
+        if (buffer.size > 0 && flushTimer == null) flushTimer = setTimeout(flush, 500);
+      }
+    }
+
+    function scheduleFlush() {
+      if (flushTimer != null || flushing) return;
+      flushTimer = setTimeout(flush, 500);
+    }
 
     const channel = supabase
       .channel('panels-live')
@@ -79,15 +116,16 @@ export function usePanelsRealtime() {
             console.error('Skipped an incomplete/malformed realtime panel payload:', payload.new);
             return;
           }
-          db.panels.put(fromRealtimeRow(payload.new)).catch((err) => {
-            console.error('Applying live panel update failed:', err);
-          });
+          const panel = fromRealtimeRow(payload.new);
+          buffer.set(panel.panelId, panel); // de-dupe: only the latest version per panel survives
+          scheduleFlush();
         }
       )
       .subscribe();
 
     return () => {
       supabase.removeChannel(channel);
+      if (flushTimer != null) clearTimeout(flushTimer);
     };
   }, []);
 }
