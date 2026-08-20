@@ -48,7 +48,7 @@ export default function Sync() {
       setStatus(
         `Done: sent ${result.pushedIssues + result.pushedReplacements} of yours, received ${
           result.pulledIssues + result.pulledReplacements
-        } from others.`
+        } from others, ${result.pulledPanels} panel(s) updated.`
       );
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));

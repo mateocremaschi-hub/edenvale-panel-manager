@@ -42,6 +42,7 @@ function toSupaPanel(p: Panel) {
     status: p.status,
     install_date: p.installDate ?? null,
     sun_manager_id: p.sunManagerId ?? null,
+    updated_at: new Date().toISOString(),
   };
 }
 
@@ -163,5 +164,61 @@ export async function pullLocationsAndPanels(onProgress?: (p: SyncProgress) => v
   }
 
   if (panelTotal > 0) await setDataSource('real');
+  // A full pull just brought every panel up to date -- mark the incremental-sync checkpoint as
+  // "now" so the next regular sync doesn't try to re-pull all ~378k rows individually.
+  await setPanelsSyncCheckpoint(new Date().toISOString());
   return { locations: locTotal, panels: panelTotal };
+}
+
+async function getPanelsSyncCheckpoint(): Promise<string | null> {
+  const entry = await db.meta.get('panelsSyncCheckpoint');
+  return entry?.value ?? null;
+}
+
+async function setPanelsSyncCheckpoint(iso: string): Promise<void> {
+  await db.meta.put({ key: 'panelsSyncCheckpoint', value: iso });
+}
+
+/** Downloads only panels changed since the last incremental sync -- paginated, since a large
+ * historical Excel import or a full "Push local data" run can touch thousands of rows at once,
+ * but normally this is a handful. Wired into the regular sync cycle (syncOperationalRecords) so
+ * every device picks up changes like historical corrections without needing the heavy
+ * "Re-download all locations & panels" button, which stays for full-refresh /
+ * first-time-setup use. If no checkpoint exists yet (this device has never done a full sync),
+ * does nothing -- there's nothing meaningful to compare "changed since" against, and the
+ * regular first-launch full pull (initData.ts) is what populates a fresh device instead. */
+export async function pullPanelsUpdatedSince(): Promise<number> {
+  const supabase = getSupabase();
+  if (!supabase) return 0;
+  const checkpoint = await getPanelsSyncCheckpoint();
+  if (!checkpoint) {
+    // First time this runs on a device that already has local panel data (not from a full
+    // pull/push just now, which already sets this) -- bootstrap from "now" rather than forcing
+    // everyone through a full "Re-download all locations & panels" just to start benefiting.
+    // Anything that changed on the server before this exact moment won't be caught by this
+    // bootstrap -- same one-time catch-up as a full re-download would still cover for that gap.
+    await setPanelsSyncCheckpoint(new Date().toISOString());
+    return 0;
+  }
+
+  const syncStartedAt = new Date().toISOString(); // captured BEFORE querying, so nothing that
+  // changes mid-sync is missed on the next round
+  let from = 0;
+  let count = 0;
+  for (;;) {
+    const { data, error } = await supabase
+      .from('panels')
+      .select('*')
+      .gt('updated_at', checkpoint)
+      .order('updated_at', { ascending: true })
+      .range(from, from + BATCH - 1);
+    if (error) throw new Error(`Downloading updated panels failed: ${error.message}`);
+    if (!data || data.length === 0) break;
+    await db.panels.bulkPut(data.map(fromSupaPanel));
+    count += data.length;
+    if (data.length < BATCH) break;
+    from += BATCH;
+  }
+  await setPanelsSyncCheckpoint(syncStartedAt);
+  return count;
 }

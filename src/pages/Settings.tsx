@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { sha256Hex } from '@/lib/hash';
 import { requireAdminPin } from '@/lib/adminPin';
+import { pushAdminPinHash } from '@/lib/adminPinSync';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { Link } from 'react-router-dom';
 import { db, clearPanelData, setDataSource } from '@/lib/db';
@@ -266,7 +267,15 @@ export default function Settings() {
           <button
             onClick={async () => {
               if (!(await requireAdminPin(adminPin, setAdminPin, 'Enter the CURRENT admin PIN to change it:'))) return;
-              setAdminPin(pin ? await sha256Hex(pin) : null);
+              const newHash = pin ? await sha256Hex(pin) : null;
+              setAdminPin(newHash);
+              try {
+                await pushAdminPinHash(newHash);
+              } catch (err) {
+                alert(
+                  `Saved on this device, but couldn't reach the shared server (${err instanceof Error ? err.message : String(err)}) -- other devices won't get this PIN until it syncs.`
+                );
+              }
             }}
             className="rounded-lg btn-primary px-4 py-2 text-sm font-semibold text-white"
           >
