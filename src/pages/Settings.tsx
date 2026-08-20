@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { sha256Hex } from '@/lib/hash';
+import { requireAdminPin } from '@/lib/adminPin';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { Link } from 'react-router-dom';
 import { db, clearPanelData, setDataSource } from '@/lib/db';
@@ -76,6 +77,7 @@ export default function Settings() {
   const [auditResult, setAuditResult] = useState<SuspectSerial[] | null>(null);
 
   async function handleAudit() {
+    if (!(await requireAdminPin(adminPin, setAdminPin))) return;
     setAuditBusy(true);
     setAuditResult(null);
     try {
@@ -88,6 +90,7 @@ export default function Settings() {
   }
 
   async function handleCleanup() {
+    if (!(await requireAdminPin(adminPin, setAdminPin))) return;
     setCleanupError(null);
     setCleanupResult(null);
     const confirmed = confirm(
@@ -107,6 +110,7 @@ export default function Settings() {
   }
 
   async function handleHistoricalFile(file: File) {
+    if (!(await requireAdminPin(adminPin, setAdminPin))) return;
     setHistError(null);
     setHistResult(null);
     setHistBusy(true);
@@ -133,6 +137,7 @@ export default function Settings() {
   const [pushDone, setPushDone] = useState(false);
 
   async function handlePush() {
+    if (!(await requireAdminPin(adminPin, setAdminPin))) return;
     setPushError(null);
     setPushDone(false);
     const confirmed = confirm(
@@ -157,24 +162,12 @@ export default function Settings() {
   }
 
   async function toggleOperator(id: string, active: boolean) {
+    if (!(await requireAdminPin(adminPin, setAdminPin))) return;
     await db.operators.update(id, { active: !active });
   }
 
   async function resetAllPanelData() {
-    if (adminPin) {
-      const entered = prompt('Enter admin PIN to reset all panel data:');
-      if (entered == null) return;
-      // Accept the new hashed format or (one-time) the old plain-text format, quietly
-      // upgrading it to a hash so nobody gets locked out by this change.
-      if ((await sha256Hex(entered)) === adminPin) {
-        // ok
-      } else if (entered === adminPin) {
-        setAdminPin(await sha256Hex(entered));
-      } else {
-        alert('Incorrect PIN.');
-        return;
-      }
-    }
+    if (!(await requireAdminPin(adminPin, setAdminPin, 'Enter admin PIN to reset all panel data:'))) return;
     const confirmed = confirm(
       'This deletes ALL panels, locations, issues, replacements and activity history on THIS device/URL. Operators are kept. This cannot be undone. Continue?'
     );
@@ -204,7 +197,13 @@ export default function Settings() {
             onChange={(e) => setName(e.target.value)}
             className="flex-1 rounded-lg border border-border bg-bg px-3 py-2 text-sm text-slate-100"
           />
-          <button onClick={() => setAppName(name)} className="rounded-lg bg-accent-blue px-4 py-2 text-sm font-semibold text-white">
+          <button
+            onClick={async () => {
+              if (!(await requireAdminPin(adminPin, setAdminPin))) return;
+              setAppName(name);
+            }}
+            className="rounded-lg bg-accent-blue px-4 py-2 text-sm font-semibold text-white"
+          >
             Save
           </button>
         </div>
@@ -265,7 +264,10 @@ export default function Settings() {
             className="flex-1 rounded-lg border border-border bg-bg px-3 py-2 text-sm text-slate-100"
           />
           <button
-            onClick={async () => setAdminPin(pin ? await sha256Hex(pin) : null)}
+            onClick={async () => {
+              if (!(await requireAdminPin(adminPin, setAdminPin, 'Enter the CURRENT admin PIN to change it:'))) return;
+              setAdminPin(pin ? await sha256Hex(pin) : null);
+            }}
             className="rounded-lg bg-accent-blue px-4 py-2 text-sm font-semibold text-white"
           >
             Save
@@ -290,7 +292,10 @@ export default function Settings() {
             className="w-24 rounded-lg border border-border bg-bg px-3 py-2 text-sm text-slate-100"
           />
           <button
-            onClick={() => setVoltageRange(Number(vMin), Number(vMax))}
+            onClick={async () => {
+              if (!(await requireAdminPin(adminPin, setAdminPin))) return;
+              setVoltageRange(Number(vMin), Number(vMax));
+            }}
             className="rounded-lg bg-accent-blue px-4 py-2 text-sm font-semibold text-white"
           >
             Save

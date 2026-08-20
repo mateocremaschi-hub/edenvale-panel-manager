@@ -5,6 +5,8 @@ import { autoDetectMapping } from '@/lib/excelFields';
 import { REQUIRED_IMPORT_FIELDS, type ColumnMapping, type ImportRow } from '@/lib/importTypes';
 import { commitBatch, loadExistingPanelIndex, logImportEvent, newCommitStats, type CommitStats } from '@/lib/importCommit';
 import { useSession } from '@/store/session';
+import { useSettings } from '@/store/settings';
+import { requireAdminPin } from '@/lib/adminPin';
 
 type Step = 'select' | 'confirm' | 'running' | 'done';
 
@@ -32,6 +34,7 @@ function guessHeaderRowIndex(rows: unknown[][]): number {
 export default function RestoreMaster() {
   const navigate = useNavigate();
   const { operatorId } = useSession();
+  const { adminPin, setAdminPin } = useSettings();
   const sessionRef = useRef<ExcelImportSession | null>(null);
 
   const [step, setStep] = useState<Step>('select');
@@ -77,6 +80,7 @@ export default function RestoreMaster() {
   }
 
   async function runRestore() {
+    if (!(await requireAdminPin(adminPin, setAdminPin))) return;
     const confirmed = confirm(
       `This will scan all ${totalRows.toLocaleString()} rows and, for every panel whose current serial or status differs from this file, force it back to match -- undoing any historical-replacement Excel imports. It will NOT touch issues, replacements, or photos. This cannot be undone automatically. Continue?`
     );
