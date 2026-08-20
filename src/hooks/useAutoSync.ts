@@ -27,10 +27,20 @@ export function useAutoSync() {
 
     run(); // once on mount, in case there's anything pending from a previous offline session
     window.addEventListener('online', run);
+    // Mobile browsers routinely suspend background tabs (and their websocket connections,
+    // including the Realtime subscription) to save battery. Without this, a phone that's been
+    // locked/backgrounded for a while could sit stale until the next 3-minute interval fires --
+    // catching up the moment the person actually looks at the screen again is worth the extra
+    // sync call.
+    function onVisible() {
+      if (document.visibilityState === 'visible') run();
+    }
+    document.addEventListener('visibilitychange', onVisible);
     const interval = window.setInterval(run, PERIODIC_MS);
 
     return () => {
       window.removeEventListener('online', run);
+      document.removeEventListener('visibilitychange', onVisible);
       window.clearInterval(interval);
     };
   }, []);
