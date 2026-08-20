@@ -45,9 +45,23 @@ function positionFromDistance(distanceM: number): number {
 // arrayBus's own string count, e.g. block 7 tracker 028's R4 row uses strings 5 and 6
 // (S-7.2.12.1.5 / .1.6), not 1/2. So this is relative (lower vs higher of whichever two numbers
 // actually exist for this row), never a comparison against a literal constant.
+//
+// Within the far string specifically: module 1 sits at the row's FAR OUTER end, module 28 sits
+// in the row's MIDDLE (right next to the near string's own module 28) -- i.e. module numbers
+// DESCEND as you walk further from the DC box, the opposite of the near string (where module
+// numbers ASCEND with distance from the DC box). Confirmed by a real field count in block 5,
+// tracker 42 R1 (walked string .2 from the DC box by hand): the panel physically closest to the
+// DC box (combined position 29, right after string .1's module 28) carries the serial the master
+// data calls string .2's MODULE 28, and the panel at the row's far outer end (combined position
+// 56) carries the serial master data calls MODULE 1 -- the reverse of naively continuing the
+// near string's ascending count. An earlier Google-Maps-coordinate test (block 5, "module 3")
+// had seemed to confirm the OLD ascending-for-both-strings formula, but that coordinate was a
+// human-estimated pin near the exact string-boundary -- the least reliable spot for an
+// imprecise coordinate to land correctly -- and is superseded by this more reliable direct
+// physical count.
 function halfAndModule(position: number): { nearHalf: boolean; module: number } {
   const nearHalf = position <= 28;
-  const module = nearHalf ? position : position - 28;
+  const module = nearHalf ? position : 57 - position;
   return { nearHalf, module };
 }
 

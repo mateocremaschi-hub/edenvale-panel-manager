@@ -322,9 +322,14 @@ export async function syncOperationalRecords(onStatus?: (text: string) => void):
     // corrections, field location fixes, etc. -- which pullOperationalRecords has no way to
     // know about on its own (it only re-fetches panels REFERENCED by newly-pulled issues/
     // replacements). Cheap: only pulls what changed since this device's own last checkpoint,
-    // not the whole ~378k-row table.
-    onStatus?.('Checking for updated panels...');
-    pulledPanels = await pullPanelsUpdatedSince();
+    // not the whole ~378k-row table -- unless a whole-table event (a full "Push local data")
+    // is detected, in which case it falls back to the full pull internally and reports real
+    // progress here too, so a big catch-up shows a moving percentage instead of a stuck-looking
+    // status line.
+    pulledPanels = await pullPanelsUpdatedSince((p) => {
+      const pct = p.total > 0 ? Math.round((p.done / p.total) * 100) : 0;
+      onStatus?.(`Catching up on panel changes... ${pct}%`);
+    });
   } catch (err) {
     console.error('Downloading updated panels failed:', err);
   }

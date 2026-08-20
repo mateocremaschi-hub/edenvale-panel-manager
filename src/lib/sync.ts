@@ -191,8 +191,16 @@ async function setPanelsSyncCheckpoint(iso: string): Promise<void> {
  * "Re-download all locations & panels" button, which stays for full-refresh /
  * first-time-setup use. If no checkpoint exists yet (this device has never done a full sync),
  * does nothing -- there's nothing meaningful to compare "changed since" against, and the
- * regular first-launch full pull (initData.ts) is what populates a fresh device instead. */
-export async function pullPanelsUpdatedSince(): Promise<number> {
+ * regular first-launch full pull (initData.ts) is what populates a fresh device instead.
+ *
+ * Falls back to the full pullLocationsAndPanels() when the changed-since count looks like a
+ * whole-table event (a full "Push local data to Supabase" stamps updated_at on literally every
+ * row, even ones whose data didn't really change) -- paging through that via hundreds of small
+ * "incremental" requests is slow, easy to interrupt/stall mid-way, and pointless when the
+ * already-tested full-pull path handles the same volume more efficiently in one pass. */
+const FULL_RESYNC_THRESHOLD = 20000;
+
+export async function pullPanelsUpdatedSince(onProgress?: (p: SyncProgress) => void): Promise<number> {
   const supabase = getSupabase();
   if (!supabase) return 0;
   const checkpoint = await getPanelsSyncCheckpoint();
@@ -204,6 +212,15 @@ export async function pullPanelsUpdatedSince(): Promise<number> {
     // bootstrap -- same one-time catch-up as a full re-download would still cover for that gap.
     await setPanelsSyncCheckpoint(new Date().toISOString());
     return 0;
+  }
+
+  const { count: changedCount } = await supabase
+    .from('panels')
+    .select('*', { count: 'exact', head: true })
+    .gt('updated_at', checkpoint);
+  if ((changedCount ?? 0) > FULL_RESYNC_THRESHOLD) {
+    const result = await pullLocationsAndPanels(onProgress); // also advances the checkpoint
+    return result.panels;
   }
 
   const syncStartedAt = new Date().toISOString(); // captured BEFORE querying, so nothing that
