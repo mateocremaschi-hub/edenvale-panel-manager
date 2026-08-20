@@ -27,6 +27,36 @@ function fromRealtimeRow(r: SupaPanelRow): Panel {
   };
 }
 
+const VALID_STATUSES = new Set([
+  'normal',
+  'issue_reported',
+  'under_assessment',
+  'monitoring',
+  'pending_replacement',
+  'replaced',
+  'vacant',
+  'closed',
+]);
+
+/** Defensive check before applying a realtime payload -- a partial/malformed row (missing or
+ * unrecognized fields, which shouldn't normally happen but would be silently destructive if it
+ * did: a panel could lose its real status/serial and quietly stop showing as vacant/pending)
+ * must never be written to local data. Better to skip a live update (the regular pull-based
+ * sync will still catch the real state) than risk corrupting what's already there. */
+function isCompletePanelRow(r: unknown): r is SupaPanelRow {
+  if (!r || typeof r !== 'object') return false;
+  const row = r as Record<string, unknown>;
+  return (
+    typeof row.panel_id === 'string' &&
+    row.panel_id.length > 0 &&
+    typeof row.serial_number === 'string' &&
+    typeof row.location_id === 'string' &&
+    row.location_id.length > 0 &&
+    typeof row.status === 'string' &&
+    VALID_STATUSES.has(row.status)
+  );
+}
+
 /** Subscribes to live panel changes on Supabase (Realtime) so every device reflects a change
  * -- a field correction, an historical Excel import, another admin's push -- the moment it
  * happens, without waiting for the periodic sync or a manual "Sync now"/"Re-download". This is
@@ -45,9 +75,11 @@ export function usePanelsRealtime() {
         { event: '*', schema: 'public', table: 'panels' },
         (payload) => {
           if (payload.eventType === 'DELETE') return; // panels are never deleted, only updated
-          const row = payload.new as SupaPanelRow;
-          if (!row?.panel_id) return;
-          db.panels.put(fromRealtimeRow(row)).catch((err) => {
+          if (!isCompletePanelRow(payload.new)) {
+            console.error('Skipped an incomplete/malformed realtime panel payload:', payload.new);
+            return;
+          }
+          db.panels.put(fromRealtimeRow(payload.new)).catch((err) => {
             console.error('Applying live panel update failed:', err);
           });
         }

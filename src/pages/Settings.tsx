@@ -11,6 +11,7 @@ import { newId } from '@/lib/id';
 import { hasSupabase } from '@/lib/supabase';
 import { pushLocationsAndPanels, type SyncProgress } from '@/lib/sync';
 import { parseHistoricalReplacementsFile, applyHistoricalReplacements, removeHistoricalReplacementRecords, findSuspectSerials, type HistoricalApplyResult, type HistoricalCleanupResult, type SuspectSerial, type HistoricalRow } from '@/lib/historicalReplacements';
+import { logImportEvent } from '@/lib/importCommit';
 
 export default function Settings() {
   const operators = useLiveQuery(() => db.operators.toArray(), [], []);
@@ -128,6 +129,12 @@ export default function Settings() {
       setHistResult(result);
       setHistPreviewRows(null);
       setHistPreviewChecks(null);
+      if (operatorId) {
+        await logImportEvent(
+          operatorId,
+          `Apply historical replacements (${file.name}): ${result.matched} matched, ${result.vacated} marked vacant, ${result.relocatedFrom} relocated-from, ${result.notFound.length} not found`
+        );
+      }
     } catch (err) {
       setHistError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -142,7 +149,7 @@ export default function Settings() {
     setPushError(null);
     setPushDone(false);
     const confirmed = confirm(
-      "This uploads every location and panel on THIS device to the shared Supabase project, so every other device can see the same real data. Only run this from the device that has the real imported Excel data. It can take a couple of minutes. Continue?"
+      "⚠ This OVERWRITES every location and panel on the shared server with whatever is on THIS device right now -- including wiping out any newer changes other devices or historical Excel imports have already pushed, if this device's local copy doesn't have them too. Only use this for the very first setup, or if you've just confirmed (e.g. via Records → Vacant) that THIS device's data is the most complete and correct version. When in doubt, use \"Re-download all locations & panels\" on the Sync page instead -- that pulls the server's data down, it never pushes local data up. Continue?"
     );
     if (!confirmed) return;
     try {
