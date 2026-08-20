@@ -135,13 +135,39 @@ export default function BlockView() {
     [geometry]
   );
 
-  function panelsForStringCode(code: string): Panel[] {
-    const parts = parseStringCode(code);
-    if (!parts) return [];
+  const selectedTrackerInfo = selectedTrackerNum ? geometry?.trackers[`${bpad}-${selectedTrackerNum}`] : undefined;
+
+  // Same isolated/last-in-chain rule as the drone locator's halfAndModule() -- see
+  // dronePicas.ts for the full piercing-connector explanation. Computed once per tracker
+  // (pos/pos_total don't vary between a tracker's own rows/strings).
+  const farStringAscendsFromDcBox =
+    selectedTrackerInfo?.pos == null ||
+    selectedTrackerInfo?.pos_total == null ||
+    selectedTrackerInfo.pos === selectedTrackerInfo.pos_total;
+
+  /** Panels for a string, ordered to always walk DC-box-near -> DC-box-far left to right --
+   * matching how a technician actually walks the row, instead of raw ascending module number
+   * (which flips direction on the far string of a non-last tracker; see dronePicas.ts). */
+  function panelsForString(s: GeometryString): { panels: Panel[]; nearEndLabel: string; farEndLabel: string } {
+    const parts = parseStringCode(s.n);
+    if (!parts || !geometry) return { panels: [], nearEndLabel: 'Near', farEndLabel: 'Far' };
     const prefix = `${parts.block}.${parts.inverter}.${parts.dcBox}.${parts.arrayBus}.${parts.string}.`;
-    return blockPanels
+    const ascending = blockPanels
       .filter((p) => p.locationId.startsWith(prefix))
       .sort((a, b) => Number(a.locationId.split('.').pop()) - Number(b.locationId.split('.').pop()));
+
+    const rowPeerNums = geometry.strings
+      .filter((gs) => gs.t === s.t && gs.r === s.r)
+      .map((gs) => parseStringCode(gs.n)?.string)
+      .filter((n): n is number => n != null);
+    const isNearString = rowPeerNums.length < 2 || parts.string === Math.min(...rowPeerNums);
+    const walksAscending = isNearString || farStringAscendsFromDcBox;
+
+    return {
+      panels: walksAscending ? ascending : [...ascending].reverse(),
+      nearEndLabel: '⚡ Near DC box',
+      farEndLabel: 'Far end',
+    };
   }
 
   /** Selects the WHOLE tracker (all its rows/strings together) -- a double tracker with
@@ -153,8 +179,6 @@ export default function BlockView() {
     const rows = geometry.strings.filter((s) => s.t === trackerNum).sort((a, b) => (a.r ?? '').localeCompare(b.r ?? ''));
     setSelectedRows(rows);
   }
-
-  const selectedTrackerInfo = selectedTrackerNum ? geometry?.trackers[`${bpad}-${selectedTrackerNum}`] : undefined;
 
   if (!Number.isFinite(block)) {
     return <div className="text-sm text-status-pending">Invalid block number.</div>;
@@ -327,9 +351,18 @@ export default function BlockView() {
           </div>
           <div className="flex flex-col gap-4">
             {selectedRows.length === 0 && <p className="text-sm text-slate-500">No strings mapped to this tracker.</p>}
-            {selectedRows.map((s) => (
-              <PanelStrip key={s.n} title={`${s.r ?? ''} · ${s.n}`} panels={panelsForStringCode(s.n)} />
-            ))}
+            {selectedRows.map((s) => {
+              const { panels, nearEndLabel, farEndLabel } = panelsForString(s);
+              return (
+                <PanelStrip
+                  key={s.n}
+                  title={`${s.r ?? ''} · ${s.n}`}
+                  panels={panels}
+                  nearEndLabel={nearEndLabel}
+                  farEndLabel={farEndLabel}
+                />
+              );
+            })}
           </div>
         </div>
       )}
