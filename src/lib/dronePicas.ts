@@ -46,22 +46,34 @@ function positionFromDistance(distanceM: number): number {
 // (S-7.2.12.1.5 / .1.6), not 1/2. So this is relative (lower vs higher of whichever two numbers
 // actually exist for this row), never a comparison against a literal constant.
 //
-// Within the far string specifically: module 1 sits at the row's FAR OUTER end, module 28 sits
-// in the row's MIDDLE (right next to the near string's own module 28) -- i.e. module numbers
-// DESCEND as you walk further from the DC box, the opposite of the near string (where module
-// numbers ASCEND with distance from the DC box). Confirmed by a real field count in block 5,
-// tracker 42 R1 (walked string .2 from the DC box by hand): the panel physically closest to the
-// DC box (combined position 29, right after string .1's module 28) carries the serial the master
-// data calls string .2's MODULE 28, and the panel at the row's far outer end (combined position
-// 56) carries the serial master data calls MODULE 1 -- the reverse of naively continuing the
-// near string's ascending count. An earlier Google-Maps-coordinate test (block 5, "module 3")
-// had seemed to confirm the OLD ascending-for-both-strings formula, but that coordinate was a
-// human-estimated pin near the exact string-boundary -- the least reliable spot for an
-// imprecise coordinate to land correctly -- and is superseded by this more reliable direct
-// physical count.
-function halfAndModule(position: number): { nearHalf: boolean; module: number } {
+// Whether the far string's module numbers ASCEND (same direction as the near string) or DESCEND
+// (mirrored) depends on a real physical detail explained by the user after two rounds of
+// contradictory-seeming field tests: a "piercing connector" sits between adjacent trackers in a
+// row-chain, carrying the run to the next tracker. Module 1 of a string is always counted from
+// its own NEAREST piercing connector (or the DC box itself, for the very first string in a
+// chain). Concretely, for a given tracker within its row-chain:
+//   - If it's NOT the last tracker in the chain (more trackers follow): the piercing connector
+//     at ITS OWN far end (shared with the NEXT tracker) is the far string's nearest reference --
+//     so the far string's module numbers DESCEND with distance from the DC box (module 1 at the
+//     far/piercing end, module 28 next to the near string). Field-confirmed: block 5 tracker 42
+//     (pos 1 of 2, i.e. not the last) -- walking string .2 by hand from the DC box, the panel
+//     right next to string .1's module 28 carries the serial master data calls MODULE 28, and
+//     the far outer end (at the piercing connector, shared with the next tracker) carries what
+//     master data calls MODULE 1.
+//   - If it's isolated (alone in its row, no chain) OR the LAST tracker in a chain: there's no
+//     piercing connector at its own true far end to reference (an isolated tracker has none at
+//     all; the last tracker's far string instead runs an extension back to the SAME piercing
+//     connector at ITS OWN start, shared with the previous tracker) -- so the far string's
+//     module numbers ASCEND with distance from the DC box, same direction as the near string,
+//     same as if there were no chain at all. Field-confirmed: block 4 tracker 016 (pos 1 of 1,
+//     isolated) -- the tracker behind all 4 of the original real GPS field tests that
+//     established this whole locator.
+// geometry.trackers[key].pos / .pos_total (already extracted from the CAD block drawings, used
+// elsewhere for the schematic map) is exactly "which tracker in the chain, out of how many" --
+// pos === pos_total (including the pos_total===1 isolated case) means "don't reverse."
+function halfAndModule(position: number, farStringAscends: boolean): { nearHalf: boolean; module: number } {
   const nearHalf = position <= 28;
-  const module = nearHalf ? position : 57 - position;
+  const module = nearHalf ? position : farStringAscends ? position - 28 : 57 - position;
   return { nearHalf, module };
 }
 
@@ -353,6 +365,11 @@ export async function findNearestPanel(query: LatLon): Promise<PanelMatch | NoNe
       const row = rows.length === 1 ? rows[0] : best.pica.isMotorRow ? rows[0] : rows[1];
       match.row = row;
 
+      // Isolated tracker (no chain partner) or the LAST tracker in a multi-tracker chain --
+      // both cases lack a piercing connector at this tracker's own true far end, so the far
+      // string ascends the same direction as the near string (see halfAndModule's note above).
+      const farStringAscends = trackerGeo.pos == null || trackerGeo.pos_total == null || trackerGeo.pos === trackerGeo.pos_total;
+
       // Find BOTH of this row's strings and sort by their actual string number -- never
       // assume it's literally "1" and "2" (see halfAndModule's note: block 7 tracker 028's R4
       // uses 5 and 6). Lower number = nearer the DC box, confirmed by 4 real field tests.
@@ -366,7 +383,7 @@ export async function findNearestPanel(query: LatLon): Promise<PanelMatch | NoNe
       rowStrings.sort((a, b) => a.parts.string - b.parts.string);
 
       function resolvePanel(position: number): { locationId: string; serialNumber?: string } | null {
-        const { nearHalf, module } = halfAndModule(position);
+        const { nearHalf, module } = halfAndModule(position, farStringAscends);
         const entry = nearHalf ? rowStrings[0] : rowStrings[1];
         if (!entry) return null;
         const p = entry.parts;
@@ -375,7 +392,7 @@ export async function findNearestPanel(query: LatLon): Promise<PanelMatch | NoNe
 
       const main = resolvePanel(combinedPosition);
       if (main) {
-        match.position = halfAndModule(combinedPosition).module;
+        match.position = halfAndModule(combinedPosition, farStringAscends).module;
         match.locationId = main.locationId;
         const panel = await db.panels.get(main.locationId);
         if (panel) match.serialNumber = panel.serialNumber;
