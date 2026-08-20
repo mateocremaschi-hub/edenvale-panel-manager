@@ -165,7 +165,7 @@ export default function BlockView() {
       <button onClick={() => navigate('/map')} className="mb-3 text-sm text-accent-blue">
         ← Back to map
       </button>
-      <h1 className="mb-3 text-lg font-semibold text-slate-100">Block {block}</h1>
+      <h1 className="mb-3 font-display text-xl font-bold tracking-tight text-slate-50">Block {block}</h1>
 
       {error && (
         <div className="rounded-lg bg-status-pending/20 p-3 text-sm text-status-pending">
@@ -217,7 +217,7 @@ export default function BlockView() {
 
           {viewMode === 'schematic' ? (
             <ZoomPan aspectRatio={geometry.w / geometry.h}>
-              <svg viewBox={`0 0 ${geometry.w} ${geometry.h}`} className="absolute inset-0 h-full w-full" style={{ background: '#0b1220' }}>
+              <svg viewBox={`0 0 ${geometry.w} ${geometry.h}`} className="absolute inset-0 h-full w-full" style={{ background: '#07080d' }}>
                 {geometry.axis === 'x' ? (
                   <rect x={geometry.road - geometry.w / 220} y={0} width={Math.max(2, geometry.w / 110)} height={geometry.h} fill="#182236" />
                 ) : (
@@ -260,7 +260,7 @@ export default function BlockView() {
                         fontSize={labelFont}
                         fontWeight={700}
                         fill="#ffffff"
-                        stroke="#0b1220"
+                        stroke="#07080d"
                         strokeWidth={labelFont * 0.12}
                         paintOrder="stroke"
                         style={{ pointerEvents: 'none' }}
@@ -277,7 +277,7 @@ export default function BlockView() {
                     cy={d.y}
                     r={Math.max(2, Math.min(geometry.w, geometry.h) / 220)}
                     fill="#F1C232"
-                    stroke="#0b1220"
+                    stroke="#07080d"
                     strokeWidth={1}
                     style={{ pointerEvents: 'none' }}
                   />

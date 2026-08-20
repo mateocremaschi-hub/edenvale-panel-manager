@@ -21,8 +21,8 @@ export default defineConfig({
         name: 'Edenvale Panel Manager',
         short_name: 'Panel Manager',
         description: 'Locate, report and replace individual PV panels at Edenvale Solar Farm.',
-        theme_color: '#0b1220',
-        background_color: '#0b1220',
+        theme_color: '#07080d',
+        background_color: '#07080d',
         display: 'standalone',
         start_url: '/',
         icons: [

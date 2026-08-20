@@ -47,7 +47,7 @@ export default function OperatorGate({ children }: { children: ReactNode }) {
         />
         <button
           onClick={addOperator}
-          className="rounded-xl bg-accent-blue px-4 py-3 text-base font-semibold text-white active:opacity-80"
+          className="rounded-xl btn-primary px-4 py-3 text-base font-semibold text-white active:opacity-80"
         >
           {t('operator_add_new')}
         </button>

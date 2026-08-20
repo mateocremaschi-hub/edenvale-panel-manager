@@ -16,15 +16,15 @@ const items = [
 
 export default function NavBar() {
   return (
-    <nav className="fixed bottom-0 left-0 right-0 z-40 flex overflow-x-auto border-t border-border bg-bg-panel md:static md:h-screen md:w-56 md:flex-col md:overflow-visible md:border-r md:border-t-0">
+    <nav className="fixed bottom-0 left-0 right-0 z-40 flex overflow-x-auto border-t border-border bg-bg-panel md:static md:h-screen md:w-56 md:flex-col md:gap-1 md:overflow-visible md:border-r md:border-t-0 md:p-2">
       {items.map(({ to, label, icon: Icon }) => (
         <NavLink
           key={to}
           to={to}
           end={to === '/'}
           className={({ isActive }) =>
-            `flex min-w-[76px] flex-1 flex-col items-center justify-center gap-1 px-2 py-3 text-xs font-medium md:flex-row md:justify-start md:gap-3 md:px-4 md:text-sm ${
-              isActive ? 'text-accent-blue' : 'text-slate-400 hover:text-slate-200'
+            `flex min-w-[76px] flex-1 flex-col items-center justify-center gap-1 px-2 py-3 text-xs font-medium transition-colors md:flex-row md:flex-none md:justify-start md:gap-3 md:rounded-lg md:px-3 md:py-2.5 md:text-sm ${
+              isActive ? 'text-accent-blue md:bg-accent-blue/10' : 'text-slate-400 hover:text-slate-200 md:hover:bg-white/5'
             }`
           }
         >

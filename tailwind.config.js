@@ -4,28 +4,30 @@ export default {
   theme: {
     extend: {
       colors: {
-        // Same dark professional theme as edenvale-tracker-finder / edenvale-vegetation-control,
-        // so the three Edenvale apps feel like one family.
+        // Refined dark theme -- deep, cool void with a warm-gold/deep-indigo signature accent
+        // pair ("solar horizon"), replacing the earlier flat blue-dashboard look. Status colors
+        // keep their MEANING (red=pending, orange=issue, green=replaced, grey=normal) -- only
+        // their values were refined for a more considered, less "bootstrap default" feel.
         bg: {
-          DEFAULT: '#0b1220', // map / app background (vegetation-control MAP_BG)
-          panel: '#0e1621', // card / header background (tracker-finder theme)
-          raised: '#141f30',
+          DEFAULT: '#07080d',
+          panel: '#12141d',
+          raised: '#1b1e2a',
         },
         border: {
-          DEFAULT: '#22304a',
+          DEFAULT: '#242838',
         },
         accent: {
-          blue: '#4A90D9',
-          teal: '#3FB8AF',
-          amber: '#F1C232',
+          blue: '#5B6EF5', // primary action color -- refined indigo-violet, not generic SaaS blue
+          teal: '#14B8A6',
+          amber: '#F5A623', // signature "solar/energy" accent -- used sparingly (horizon line, highlights)
         },
         status: {
-          normal: '#5B7290', // neutral grey-blue
-          reported: '#E08A3C', // orange
-          pending: '#D9534F', // red
-          replaced: '#5CB85C', // green
-          observation: '#F1C232', // yellow
-          selected: '#4A90D9', // blue outline
+          normal: '#7C8AA5',
+          reported: '#F0975A',
+          pending: '#EF6461',
+          replaced: '#4ADE94',
+          observation: '#FBC343',
+          selected: '#5B6EF5',
         },
         row: {
           r1: '#E0745A',
@@ -37,6 +39,7 @@ export default {
       },
       fontFamily: {
         sans: ['Inter', 'system-ui', 'sans-serif'],
+        display: ['"Space Grotesk"', 'Inter', 'system-ui', 'sans-serif'],
       },
     },
   },

@@ -456,10 +456,10 @@ export default function Replacements() {
   return (
     <div>
       <div className="mb-4 flex items-center justify-between">
-        <h1 className="text-lg font-semibold text-slate-100">Replacements</h1>
+        <h1 className="font-display text-xl font-bold tracking-tight text-slate-50">Replacements</h1>
         <button
           onClick={() => setOpen(true)}
-          className="rounded-xl bg-accent-blue px-4 py-2 text-sm font-semibold text-white active:opacity-80"
+          className="rounded-xl btn-primary px-4 py-2 text-sm font-semibold text-white active:opacity-80"
         >
           + New replacement
         </button>
@@ -564,7 +564,7 @@ export default function Replacements() {
                     <div className="flex gap-2">
                       <button
                         onClick={registerFieldDiscrepancy}
-                        className="rounded-lg bg-accent-blue px-4 py-2 text-sm font-semibold text-white"
+                        className="rounded-lg btn-primary px-4 py-2 text-sm font-semibold text-white"
                       >
                         Register what's actually there
                       </button>
@@ -823,7 +823,7 @@ export default function Replacements() {
                 <button
                   onClick={confirmReplacement}
                   disabled={saving}
-                  className="rounded-lg bg-accent-blue px-4 py-2 text-sm font-semibold text-white disabled:opacity-40"
+                  className="rounded-lg btn-primary px-4 py-2 text-sm font-semibold text-white disabled:opacity-40"
                 >
                   Confirm {isVacantSlot ? 'installation' : 'replacement'}
                 </button>
@@ -896,7 +896,7 @@ export default function Replacements() {
             <button
               onClick={downloadPdf}
               disabled={pdfGenerating}
-              className="self-start rounded-lg bg-accent-blue px-4 py-2 text-sm font-semibold text-white disabled:opacity-40"
+              className="self-start rounded-lg btn-primary px-4 py-2 text-sm font-semibold text-white disabled:opacity-40"
             >
               {pdfGenerating ? pdfStatus || 'Generating...' : 'Download PDF'}
             </button>

@@ -180,7 +180,7 @@ export default function Settings() {
   return (
     <div className="flex flex-col gap-6 pb-20">
       <div>
-        <h1 className="text-lg font-semibold text-slate-100">Settings</h1>
+        <h1 className="font-display text-xl font-bold tracking-tight text-slate-50">Settings</h1>
         <p className="text-xs text-slate-500">
           Build:{' '}
           {typeof __BUILD_TIME__ !== 'undefined' && __BUILD_TIME__
@@ -202,7 +202,7 @@ export default function Settings() {
               if (!(await requireAdminPin(adminPin, setAdminPin))) return;
               setAppName(name);
             }}
-            className="rounded-lg bg-accent-blue px-4 py-2 text-sm font-semibold text-white"
+            className="rounded-lg btn-primary px-4 py-2 text-sm font-semibold text-white"
           >
             Save
           </button>
@@ -268,7 +268,7 @@ export default function Settings() {
               if (!(await requireAdminPin(adminPin, setAdminPin, 'Enter the CURRENT admin PIN to change it:'))) return;
               setAdminPin(pin ? await sha256Hex(pin) : null);
             }}
-            className="rounded-lg bg-accent-blue px-4 py-2 text-sm font-semibold text-white"
+            className="rounded-lg btn-primary px-4 py-2 text-sm font-semibold text-white"
           >
             Save
           </button>
@@ -296,7 +296,7 @@ export default function Settings() {
               if (!(await requireAdminPin(adminPin, setAdminPin))) return;
               setVoltageRange(Number(vMin), Number(vMax));
             }}
-            className="rounded-lg bg-accent-blue px-4 py-2 text-sm font-semibold text-white"
+            className="rounded-lg btn-primary px-4 py-2 text-sm font-semibold text-white"
           >
             Save
           </button>
@@ -332,7 +332,7 @@ export default function Settings() {
                 </div>
               </div>
             ) : (
-              <button onClick={handlePush} className="rounded-lg bg-accent-blue px-4 py-2 text-sm font-semibold text-white">
+              <button onClick={handlePush} className="rounded-lg btn-primary px-4 py-2 text-sm font-semibold text-white">
                 Push local data to Supabase
               </button>
             )}
@@ -386,7 +386,7 @@ export default function Settings() {
             {histProgress ? `Processing ${histProgress.done} / ${histProgress.total}...` : 'Reading file...'}
           </p>
         ) : (
-          <label className="inline-block cursor-pointer rounded-lg bg-accent-blue px-4 py-2 text-sm font-semibold text-white">
+          <label className="inline-block cursor-pointer rounded-lg btn-primary px-4 py-2 text-sm font-semibold text-white">
             Choose Excel file
             <input
               type="file"
@@ -420,7 +420,7 @@ export default function Settings() {
             </p>
             <button
               onClick={() => histFile && handleHistoricalFile(histFile)}
-              className="self-start rounded-lg bg-accent-blue px-4 py-2 text-sm font-semibold text-white"
+              className="self-start rounded-lg btn-primary px-4 py-2 text-sm font-semibold text-white"
             >
               Looks right -- run the full update
             </button>

@@ -124,7 +124,7 @@ export default function DroneLocator() {
   return (
     <div className="flex flex-col gap-6 pb-20">
       <div>
-        <h1 className="text-lg font-semibold text-slate-100">Locate panel from drone photo</h1>
+        <h1 className="font-display text-xl font-bold tracking-tight text-slate-50">Locate panel from drone photo</h1>
         <p className="mt-1 text-sm text-slate-400">
           Upload a thermal-inspection drone photo (or type its coordinates) and this finds the closest panel,
           using the tracker GPS survey data.
@@ -135,7 +135,7 @@ export default function DroneLocator() {
         <h2 className="mb-2 text-sm font-semibold text-slate-200">Find a panel</h2>
         {lookupError && <div className="mb-3 rounded-lg bg-status-pending/20 p-2 text-xs text-status-pending">{lookupError}</div>}
 
-        <label className="mb-3 inline-block cursor-pointer rounded-lg bg-accent-blue px-4 py-2 text-sm font-semibold text-white">
+        <label className="mb-3 inline-block cursor-pointer rounded-lg btn-primary px-4 py-2 text-sm font-semibold text-white">
           📷 Upload drone photo
           <input
             type="file"
@@ -297,7 +297,7 @@ export default function DroneLocator() {
             <button
               onClick={confirmImport}
               disabled={importBusy}
-              className="mt-3 rounded-lg bg-accent-blue px-4 py-2 text-xs font-semibold text-white disabled:opacity-40"
+              className="mt-3 rounded-lg btn-primary px-4 py-2 text-xs font-semibold text-white disabled:opacity-40"
             >
               {importBusy ? 'Importing...' : 'Looks right -- import'}
             </button>

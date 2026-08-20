@@ -115,7 +115,7 @@ export default function RestoreMaster() {
 
   return (
     <div>
-      <h1 className="mb-2 text-lg font-semibold text-slate-100">Restore panel data from master Excel</h1>
+      <h1 className="mb-2 font-display text-xl font-bold tracking-tight text-slate-50">Restore panel data from master Excel</h1>
       <p className="mb-4 text-sm text-slate-400">
         Undoes the effect of any historical-replacement Excel imports (including "vacant" marks), by
         forcing every panel's serial number and status back to whatever your original master farm
@@ -126,7 +126,7 @@ export default function RestoreMaster() {
       {error && <div className="mb-4 rounded-lg bg-status-pending/20 p-3 text-sm text-status-pending">{error}</div>}
 
       {step === 'select' && (
-        <label className="inline-block cursor-pointer rounded-lg bg-accent-blue px-4 py-2 text-sm font-semibold text-white">
+        <label className="inline-block cursor-pointer rounded-lg btn-primary px-4 py-2 text-sm font-semibold text-white">
           Choose master Excel file
           <input type="file" accept=".xlsx,.xls" className="hidden" onChange={(e) => e.target.files?.[0] && onFileSelected(e.target.files[0])} />
         </label>

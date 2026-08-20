@@ -74,7 +74,7 @@ export default function Sync() {
 
   return (
     <div>
-      <h1 className="mb-4 text-lg font-semibold text-slate-100">Sync</h1>
+      <h1 className="mb-4 font-display text-xl font-bold tracking-tight text-slate-50">Sync</h1>
       <div className="rounded-xl border border-border bg-bg-panel p-4 text-sm text-slate-300">
         {configured ? (
           <p>
@@ -132,7 +132,7 @@ export default function Sync() {
             <p className="text-xs text-slate-400">{status}</p>
           ) : (
             <div className="flex items-center justify-between">
-              <button onClick={syncNow} className="rounded-lg bg-accent-blue px-4 py-2 text-sm font-semibold text-white">
+              <button onClick={syncNow} className="rounded-lg btn-primary px-4 py-2 text-sm font-semibold text-white">
                 Sync now
               </button>
               <div className="text-right text-xs text-slate-500">
