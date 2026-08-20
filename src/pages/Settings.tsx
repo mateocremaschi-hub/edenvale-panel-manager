@@ -353,6 +353,14 @@ export default function Settings() {
         {histError && <div className="mb-3 rounded-lg bg-status-pending/20 p-2 text-xs text-status-pending">{histError}</div>}
         {histResult && (
           <div className="mb-3 flex flex-col gap-2 rounded-lg border border-border p-3 text-xs">
+            {histResult.pushFailed ? (
+              <div className="rounded-lg border border-status-pending bg-status-pending/10 p-2 text-status-pending">
+                ⚠ Saved on this device, but couldn't reach the shared server just now (no connection?) -- other
+                devices won't see this until it syncs. It'll retry automatically, or tap "Sync now" on the Sync page.
+              </div>
+            ) : (
+              <div className="text-status-replaced">✓ Uploaded to the shared server -- other devices will see this on their next sync.</div>
+            )}
             <div className="text-status-replaced">✓ {histResult.matched} panel(s) updated.</div>
             {histResult.vacated > 0 && (
               <div className="text-status-pending">

@@ -3,6 +3,7 @@ import { db } from './db';
 import { newId } from './id';
 import { nowIso } from './time';
 import { getSupabase } from './supabase';
+import { pushPanelsById } from './sync';
 import { looksLikeRealSerial } from './panelDisplay';
 import type { ActivityEvent } from './types';
 
@@ -60,6 +61,7 @@ export interface HistoricalApplyResult {
   relocatedFrom: number; // "after" was found installed elsewhere -- that ORIGIN location marked vacant too
   notFound: string[]; // "before" serials that don't exist as a current panel
   alreadyCurrent: string[]; // "before" serial IS a panel, but its serial already equals "after" (re-run, no-op)
+  pushFailed?: boolean; // changes saved locally but couldn't reach the shared server -- will retry on next sync
 }
 
 /** Reads the "Serial Number (Before)" / "Serial Number (After)" / "Type of module" columns from
@@ -148,6 +150,13 @@ export async function applyHistoricalReplacements(
     if (looksLikeRealSerial(r.after)) claimedAsAfter.add(r.after.trim());
   }
 
+  // Every panelId this run actually writes to -- pushed to the shared server automatically at
+  // the end, so this doesn't silently stay local-only until someone remembers to also tap
+  // "Push local data to Supabase" in Settings (that button is really for the one-time initial
+  // bulk load of the whole 377k-row table, not something to re-run after every reconciliation
+  // Excel).
+  const touchedPanelIds: string[] = [];
+
   for (let i = 0; i < rows.length; i++) {
     const { before, after, moduleType } = rows[i];
     onProgress?.(i + 1, rows.length);
@@ -189,6 +198,7 @@ export async function applyHistoricalReplacements(
         await db.panels.update(destPanel.panelId, { serialNumber: newSerial, status: isVacating ? 'vacant' : 'normal' });
         await db.activityEvents.add(destEvent);
       });
+      touchedPanelIds.push(destPanel.panelId);
       if (isVacating) result.vacated++;
       else result.matched++;
     }
@@ -216,8 +226,21 @@ export async function applyHistoricalReplacements(
           await db.panels.update(originPanel.panelId, { serialNumber: `VACANT-${originPanel.locationId}`, status: 'vacant' });
           await db.activityEvents.add(originEvent);
         });
+        touchedPanelIds.push(originPanel.panelId);
         result.relocatedFrom++;
       }
+    }
+  }
+
+  if (touchedPanelIds.length > 0) {
+    try {
+      await pushPanelsById(touchedPanelIds);
+    } catch (err) {
+      // Don't fail the whole import over a network hiccup -- the changes are safely saved
+      // locally either way, and the regular sync cycle will retry pushing them soon. Surface
+      // it in the result so the UI can at least warn rather than silently claiming success.
+      console.error('Pushing historical-replacement changes to the shared server failed (will retry on next sync):', err);
+      result.pushFailed = true;
     }
   }
 
