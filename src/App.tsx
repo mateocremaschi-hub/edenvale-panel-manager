@@ -17,10 +17,12 @@ import ImportHistory from '@/pages/ImportHistory';
 import DroneLocator from '@/pages/DroneLocator';
 import BlockView from '@/pages/BlockView';
 import { useAutoSync } from '@/hooks/useAutoSync';
+import { usePanelsRealtime } from '@/hooks/usePanelsRealtime';
 import { useAppUpdate } from '@/hooks/useAppUpdate';
 
 export default function App() {
   useAutoSync();
+  usePanelsRealtime();
   const { needRefresh, applyUpdate } = useAppUpdate();
   return (
     <HashRouter>
