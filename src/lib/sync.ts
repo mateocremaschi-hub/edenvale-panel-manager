@@ -141,7 +141,12 @@ export async function pullLocationsAndPanels(onProgress?: (p: SyncProgress) => v
 
   let locTotal = 0;
   for (let from = 0; ; from += BATCH) {
-    const { data, error } = await supabase.from('locations').select('*').range(from, from + BATCH - 1);
+    // Explicit, stable order is required for correct pagination -- without it, Postgres/
+    // PostgREST doesn't guarantee the same row lands on the same page across separate .range()
+    // requests, especially with writes happening concurrently (e.g. another device pushing at
+    // the same time this pull is running) -- rows can silently fall through the gap between two
+    // pages and never get pulled. location_id is the primary key, so this costs nothing extra.
+    const { data, error } = await supabase.from('locations').select('*').order('location_id', { ascending: true }).range(from, from + BATCH - 1);
     if (error) throw new Error(`Pulling locations failed: ${error.message}`);
     if (!data || data.length === 0) break;
     await db.locations.bulkPut(data.map(fromSupaLocation));
@@ -153,7 +158,7 @@ export async function pullLocationsAndPanels(onProgress?: (p: SyncProgress) => v
 
   let panelTotal = 0;
   for (let from = 0; ; from += BATCH) {
-    const { data, error } = await supabase.from('panels').select('*').range(from, from + BATCH - 1);
+    const { data, error } = await supabase.from('panels').select('*').order('panel_id', { ascending: true }).range(from, from + BATCH - 1);
     if (error) throw new Error(`Pulling panels failed: ${error.message}`);
     if (!data || data.length === 0) break;
     await db.panels.bulkPut(data.map(fromSupaPanel));
@@ -211,6 +216,7 @@ export async function pullPanelsUpdatedSince(): Promise<number> {
       .select('*')
       .gt('updated_at', checkpoint)
       .order('updated_at', { ascending: true })
+      .order('panel_id', { ascending: true })
       .range(from, from + BATCH - 1);
     if (error) throw new Error(`Downloading updated panels failed: ${error.message}`);
     if (!data || data.length === 0) break;
