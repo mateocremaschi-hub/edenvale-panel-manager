@@ -42,7 +42,6 @@ function toSupaPanel(p: Panel) {
     status: p.status,
     install_date: p.installDate ?? null,
     sun_manager_id: p.sunManagerId ?? null,
-    updated_at: new Date().toISOString(),
   };
 }
 
@@ -141,12 +140,7 @@ export async function pullLocationsAndPanels(onProgress?: (p: SyncProgress) => v
 
   let locTotal = 0;
   for (let from = 0; ; from += BATCH) {
-    // Explicit, stable order is required for correct pagination -- without it, Postgres/
-    // PostgREST doesn't guarantee the same row lands on the same page across separate .range()
-    // requests, especially with writes happening concurrently (e.g. another device pushing at
-    // the same time this pull is running) -- rows can silently fall through the gap between two
-    // pages and never get pulled. location_id is the primary key, so this costs nothing extra.
-    const { data, error } = await supabase.from('locations').select('*').order('location_id', { ascending: true }).range(from, from + BATCH - 1);
+    const { data, error } = await supabase.from('locations').select('*').range(from, from + BATCH - 1);
     if (error) throw new Error(`Pulling locations failed: ${error.message}`);
     if (!data || data.length === 0) break;
     await db.locations.bulkPut(data.map(fromSupaLocation));
@@ -158,7 +152,7 @@ export async function pullLocationsAndPanels(onProgress?: (p: SyncProgress) => v
 
   let panelTotal = 0;
   for (let from = 0; ; from += BATCH) {
-    const { data, error } = await supabase.from('panels').select('*').order('panel_id', { ascending: true }).range(from, from + BATCH - 1);
+    const { data, error } = await supabase.from('panels').select('*').range(from, from + BATCH - 1);
     if (error) throw new Error(`Pulling panels failed: ${error.message}`);
     if (!data || data.length === 0) break;
     await db.panels.bulkPut(data.map(fromSupaPanel));
@@ -169,79 +163,5 @@ export async function pullLocationsAndPanels(onProgress?: (p: SyncProgress) => v
   }
 
   if (panelTotal > 0) await setDataSource('real');
-  // A full pull just brought every panel up to date -- mark the incremental-sync checkpoint as
-  // "now" so the next regular sync doesn't try to re-pull all ~378k rows individually.
-  await setPanelsSyncCheckpoint(new Date().toISOString());
   return { locations: locTotal, panels: panelTotal };
-}
-
-async function getPanelsSyncCheckpoint(): Promise<string | null> {
-  const entry = await db.meta.get('panelsSyncCheckpoint');
-  return entry?.value ?? null;
-}
-
-async function setPanelsSyncCheckpoint(iso: string): Promise<void> {
-  await db.meta.put({ key: 'panelsSyncCheckpoint', value: iso });
-}
-
-/** Downloads only panels changed since the last incremental sync -- paginated, since a large
- * historical Excel import or a full "Push local data" run can touch thousands of rows at once,
- * but normally this is a handful. Wired into the regular sync cycle (syncOperationalRecords) so
- * every device picks up changes like historical corrections without needing the heavy
- * "Re-download all locations & panels" button, which stays for full-refresh /
- * first-time-setup use. If no checkpoint exists yet (this device has never done a full sync),
- * does nothing -- there's nothing meaningful to compare "changed since" against, and the
- * regular first-launch full pull (initData.ts) is what populates a fresh device instead.
- *
- * Falls back to the full pullLocationsAndPanels() when the changed-since count looks like a
- * whole-table event (a full "Push local data to Supabase" stamps updated_at on literally every
- * row, even ones whose data didn't really change) -- paging through that via hundreds of small
- * "incremental" requests is slow, easy to interrupt/stall mid-way, and pointless when the
- * already-tested full-pull path handles the same volume more efficiently in one pass. */
-const FULL_RESYNC_THRESHOLD = 20000;
-
-export async function pullPanelsUpdatedSince(onProgress?: (p: SyncProgress) => void): Promise<number> {
-  const supabase = getSupabase();
-  if (!supabase) return 0;
-  const checkpoint = await getPanelsSyncCheckpoint();
-  if (!checkpoint) {
-    // First time this runs on a device that already has local panel data (not from a full
-    // pull/push just now, which already sets this) -- bootstrap from "now" rather than forcing
-    // everyone through a full "Re-download all locations & panels" just to start benefiting.
-    // Anything that changed on the server before this exact moment won't be caught by this
-    // bootstrap -- same one-time catch-up as a full re-download would still cover for that gap.
-    await setPanelsSyncCheckpoint(new Date().toISOString());
-    return 0;
-  }
-
-  const { count: changedCount } = await supabase
-    .from('panels')
-    .select('*', { count: 'exact', head: true })
-    .gt('updated_at', checkpoint);
-  if ((changedCount ?? 0) > FULL_RESYNC_THRESHOLD) {
-    const result = await pullLocationsAndPanels(onProgress); // also advances the checkpoint
-    return result.panels;
-  }
-
-  const syncStartedAt = new Date().toISOString(); // captured BEFORE querying, so nothing that
-  // changes mid-sync is missed on the next round
-  let from = 0;
-  let count = 0;
-  for (;;) {
-    const { data, error } = await supabase
-      .from('panels')
-      .select('*')
-      .gt('updated_at', checkpoint)
-      .order('updated_at', { ascending: true })
-      .order('panel_id', { ascending: true })
-      .range(from, from + BATCH - 1);
-    if (error) throw new Error(`Downloading updated panels failed: ${error.message}`);
-    if (!data || data.length === 0) break;
-    await db.panels.bulkPut(data.map(fromSupaPanel));
-    count += data.length;
-    if (data.length < BATCH) break;
-    from += BATCH;
-  }
-  await setPanelsSyncCheckpoint(syncStartedAt);
-  return count;
 }

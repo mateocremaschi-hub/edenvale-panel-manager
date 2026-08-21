@@ -47,16 +47,12 @@ export default function Dashboard() {
 
   return (
     <div>
-      <div className="mb-1 text-[11px] font-bold uppercase tracking-wider text-accent-amber">Live monitoring</div>
-      <h1 className="font-display text-2xl font-extrabold tracking-tight text-slate-50">{appName}</h1>
-      <p className="mb-5 mt-1 text-sm text-slate-400">
-        {totalPanels ? `${totalPanels.toLocaleString()} panels under active management` : 'Loading panel data...'}
-      </p>
+      <h1 className="mb-4 text-lg font-semibold text-slate-100">{appName}</h1>
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
         {cards.map((c) => (
-          <div key={c.label} className="card-premium p-4">
-            <div className="font-display text-2xl font-bold tracking-tight text-slate-50">{c.value}</div>
-            <div className="mt-1 text-xs font-medium text-slate-400">{c.label}</div>
+          <div key={c.label} className="rounded-xl border border-border bg-bg-panel p-4">
+            <div className="text-2xl font-bold text-slate-100">{c.value}</div>
+            <div className="mt-1 text-xs text-slate-400">{c.label}</div>
           </div>
         ))}
       </div>

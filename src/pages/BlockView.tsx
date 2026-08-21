@@ -135,39 +135,13 @@ export default function BlockView() {
     [geometry]
   );
 
-  const selectedTrackerInfo = selectedTrackerNum ? geometry?.trackers[`${bpad}-${selectedTrackerNum}`] : undefined;
-
-  // Same isolated/last-in-chain rule as the drone locator's halfAndModule() -- see
-  // dronePicas.ts for the full piercing-connector explanation. Computed once per tracker
-  // (pos/pos_total don't vary between a tracker's own rows/strings).
-  const farStringAscendsFromDcBox =
-    selectedTrackerInfo?.pos == null ||
-    selectedTrackerInfo?.pos_total == null ||
-    selectedTrackerInfo.pos === selectedTrackerInfo.pos_total;
-
-  /** Panels for a string, ordered to always walk DC-box-near -> DC-box-far left to right --
-   * matching how a technician actually walks the row, instead of raw ascending module number
-   * (which flips direction on the far string of a non-last tracker; see dronePicas.ts). */
-  function panelsForString(s: GeometryString): { panels: Panel[]; nearEndLabel: string; farEndLabel: string } {
-    const parts = parseStringCode(s.n);
-    if (!parts || !geometry) return { panels: [], nearEndLabel: 'Near', farEndLabel: 'Far' };
+  function panelsForStringCode(code: string): Panel[] {
+    const parts = parseStringCode(code);
+    if (!parts) return [];
     const prefix = `${parts.block}.${parts.inverter}.${parts.dcBox}.${parts.arrayBus}.${parts.string}.`;
-    const ascending = blockPanels
+    return blockPanels
       .filter((p) => p.locationId.startsWith(prefix))
       .sort((a, b) => Number(a.locationId.split('.').pop()) - Number(b.locationId.split('.').pop()));
-
-    const rowPeerNums = geometry.strings
-      .filter((gs) => gs.t === s.t && gs.r === s.r)
-      .map((gs) => parseStringCode(gs.n)?.string)
-      .filter((n): n is number => n != null);
-    const isNearString = rowPeerNums.length < 2 || parts.string === Math.min(...rowPeerNums);
-    const walksAscending = isNearString || farStringAscendsFromDcBox;
-
-    return {
-      panels: walksAscending ? ascending : [...ascending].reverse(),
-      nearEndLabel: '⚡ Near DC box',
-      farEndLabel: 'Far end',
-    };
   }
 
   /** Selects the WHOLE tracker (all its rows/strings together) -- a double tracker with
@@ -180,6 +154,8 @@ export default function BlockView() {
     setSelectedRows(rows);
   }
 
+  const selectedTrackerInfo = selectedTrackerNum ? geometry?.trackers[`${bpad}-${selectedTrackerNum}`] : undefined;
+
   if (!Number.isFinite(block)) {
     return <div className="text-sm text-status-pending">Invalid block number.</div>;
   }
@@ -189,7 +165,7 @@ export default function BlockView() {
       <button onClick={() => navigate('/map')} className="mb-3 text-sm text-accent-blue">
         ← Back to map
       </button>
-      <h1 className="mb-3 font-display text-xl font-bold tracking-tight text-slate-50">Block {block}</h1>
+      <h1 className="mb-3 text-lg font-semibold text-slate-100">Block {block}</h1>
 
       {error && (
         <div className="rounded-lg bg-status-pending/20 p-3 text-sm text-status-pending">
@@ -241,7 +217,7 @@ export default function BlockView() {
 
           {viewMode === 'schematic' ? (
             <ZoomPan aspectRatio={geometry.w / geometry.h}>
-              <svg viewBox={`0 0 ${geometry.w} ${geometry.h}`} className="absolute inset-0 h-full w-full" style={{ background: '#07080d' }}>
+              <svg viewBox={`0 0 ${geometry.w} ${geometry.h}`} className="absolute inset-0 h-full w-full" style={{ background: '#0b1220' }}>
                 {geometry.axis === 'x' ? (
                   <rect x={geometry.road - geometry.w / 220} y={0} width={Math.max(2, geometry.w / 110)} height={geometry.h} fill="#182236" />
                 ) : (
@@ -284,7 +260,7 @@ export default function BlockView() {
                         fontSize={labelFont}
                         fontWeight={700}
                         fill="#ffffff"
-                        stroke="#07080d"
+                        stroke="#0b1220"
                         strokeWidth={labelFont * 0.12}
                         paintOrder="stroke"
                         style={{ pointerEvents: 'none' }}
@@ -301,7 +277,7 @@ export default function BlockView() {
                     cy={d.y}
                     r={Math.max(2, Math.min(geometry.w, geometry.h) / 220)}
                     fill="#F1C232"
-                    stroke="#07080d"
+                    stroke="#0b1220"
                     strokeWidth={1}
                     style={{ pointerEvents: 'none' }}
                   />
@@ -351,18 +327,9 @@ export default function BlockView() {
           </div>
           <div className="flex flex-col gap-4">
             {selectedRows.length === 0 && <p className="text-sm text-slate-500">No strings mapped to this tracker.</p>}
-            {selectedRows.map((s) => {
-              const { panels, nearEndLabel, farEndLabel } = panelsForString(s);
-              return (
-                <PanelStrip
-                  key={s.n}
-                  title={`${s.r ?? ''} · ${s.n}`}
-                  panels={panels}
-                  nearEndLabel={nearEndLabel}
-                  farEndLabel={farEndLabel}
-                />
-              );
-            })}
+            {selectedRows.map((s) => (
+              <PanelStrip key={s.n} title={`${s.r ?? ''} · ${s.n}`} panels={panelsForStringCode(s.n)} />
+            ))}
           </div>
         </div>
       )}

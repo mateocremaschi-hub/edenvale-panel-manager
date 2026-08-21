@@ -17,12 +17,10 @@ import ImportHistory from '@/pages/ImportHistory';
 import DroneLocator from '@/pages/DroneLocator';
 import BlockView from '@/pages/BlockView';
 import { useAutoSync } from '@/hooks/useAutoSync';
-import { usePanelsRealtime } from '@/hooks/usePanelsRealtime';
 import { useAppUpdate } from '@/hooks/useAppUpdate';
 
 export default function App() {
   useAutoSync();
-  usePanelsRealtime();
   const { needRefresh, applyUpdate } = useAppUpdate();
   return (
     <HashRouter>
@@ -31,11 +29,10 @@ export default function App() {
         <div className="flex min-h-screen flex-col md:flex-row">
           <NavBar />
           <div className="flex-1 pb-16 md:pb-0">
-            <div className="horizon-line" />
             {needRefresh && (
               <button
                 onClick={applyUpdate}
-                className="flex w-full items-center justify-center gap-2 btn-primary px-4 py-2 text-sm font-semibold text-white"
+                className="flex w-full items-center justify-center gap-2 bg-accent-blue px-4 py-2 text-sm font-semibold text-white"
               >
                 🔄 New version available -- tap to update
               </button>

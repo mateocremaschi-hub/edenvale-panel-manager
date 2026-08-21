@@ -19,7 +19,7 @@ export default function ImportHistory() {
 
   return (
     <div>
-      <h1 className="mb-2 font-display text-xl font-bold tracking-tight text-slate-50">Import &amp; restore history</h1>
+      <h1 className="mb-2 text-lg font-semibold text-slate-100">Import &amp; restore history</h1>
       <p className="mb-4 text-sm text-slate-400">
         Every time someone runs "Import Excel" or "Restore panel data from master Excel", it's logged here --
         who, when, and a short summary of what happened.

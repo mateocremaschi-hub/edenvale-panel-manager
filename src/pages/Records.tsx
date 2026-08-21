@@ -50,7 +50,7 @@ export default function Records() {
 
   return (
     <div>
-      <h1 className="mb-4 font-display text-xl font-bold tracking-tight text-slate-50">Records</h1>
+      <h1 className="mb-4 text-lg font-semibold text-slate-100">Records</h1>
       <div className="mb-3 flex flex-wrap gap-2">
         {TABS.map((tb) => (
           <button

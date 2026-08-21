@@ -185,7 +185,7 @@ export default function Import() {
 
   return (
     <div className="pb-20">
-      <h1 className="mb-4 font-display text-xl font-bold tracking-tight text-slate-50">Import Excel</h1>
+      <h1 className="mb-4 text-lg font-semibold text-slate-100">Import Excel</h1>
       {error && <div className="mb-4 rounded-lg bg-status-pending/20 p-3 text-sm text-status-pending">{error}</div>}
 
       {step === 'pin' && (
@@ -199,7 +199,7 @@ export default function Import() {
               placeholder="PIN"
               className="flex-1 rounded-lg border border-border bg-bg px-3 py-2 text-sm text-slate-100"
             />
-            <button onClick={checkPin} className="rounded-lg btn-primary px-4 py-2 text-sm font-semibold text-white">
+            <button onClick={checkPin} className="rounded-lg bg-accent-blue px-4 py-2 text-sm font-semibold text-white">
               Unlock
             </button>
           </div>
@@ -272,7 +272,7 @@ export default function Import() {
           </div>
           <button
             onClick={confirmHeaderRow}
-            className="mt-3 rounded-lg btn-primary px-4 py-2 text-sm font-semibold text-white"
+            className="mt-3 rounded-lg bg-accent-blue px-4 py-2 text-sm font-semibold text-white"
           >
             Use row {headerRowIndex + 1} as header
           </button>
@@ -306,7 +306,7 @@ export default function Import() {
               </div>
             ))}
           </div>
-          <button onClick={startImport} className="mt-3 rounded-lg btn-primary px-4 py-2 text-sm font-semibold text-white">
+          <button onClick={startImport} className="mt-3 rounded-lg bg-accent-blue px-4 py-2 text-sm font-semibold text-white">
             Validate &amp; import {totalRows.toLocaleString()} rows
           </button>
         </div>
@@ -320,7 +320,7 @@ export default function Import() {
             proceed:
           </p>
           <div className="flex flex-wrap gap-2">
-            <button onClick={clearThenImport} className="rounded-lg btn-primary px-4 py-2 text-sm font-semibold text-white">
+            <button onClick={clearThenImport} className="rounded-lg bg-accent-blue px-4 py-2 text-sm font-semibold text-white">
               Clear everything &amp; import fresh
             </button>
             <button onClick={() => runImportNow()} className="rounded-lg border border-border px-4 py-2 text-sm text-slate-300">
@@ -399,7 +399,7 @@ export default function Import() {
             </div>
           </div>
           <div className="flex gap-2">
-            <button onClick={() => navigate('/')} className="rounded-lg btn-primary px-4 py-2 text-sm font-semibold text-white">
+            <button onClick={() => navigate('/')} className="rounded-lg bg-accent-blue px-4 py-2 text-sm font-semibold text-white">
               Go to Dashboard
             </button>
             <button onClick={() => navigate('/records')} className="rounded-lg border border-border px-4 py-2 text-sm text-slate-300">

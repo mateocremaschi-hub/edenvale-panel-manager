@@ -70,7 +70,7 @@ export default function BarcodeScanner({ title, onResult, onClose }: Props) {
         <button
           onClick={() => manual.trim() && onResult(manual.trim())}
           disabled={!manual.trim()}
-          className="rounded-lg btn-primary px-4 py-2 text-sm font-semibold text-white disabled:opacity-40"
+          className="rounded-lg bg-accent-blue px-4 py-2 text-sm font-semibold text-white disabled:opacity-40"
         >
           Use
         </button>

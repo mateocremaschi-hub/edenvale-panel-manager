@@ -2,10 +2,8 @@ import { getSupabase } from './supabase';
 import { db } from './db';
 import { newId } from './id';
 import { nowIso } from './time';
-import { pushPanelsById, pullPanelsById, pullPanelsUpdatedSince } from './sync';
+import { pushPanelsById, pullPanelsById } from './sync';
 import { pullTrackerPicas } from './dronePicas';
-import { pullAdminPinHash } from './adminPinSync';
-import { useSettings } from '@/store/settings';
 import type { Issue, Replacement, ActivityEvent, Photo } from './types';
 
 // ---- local -> Supabase row mappers ----
@@ -173,7 +171,6 @@ export interface OutboxSummary {
   pulledReplacements: number;
   pulledEvents: number;
   pulledPhotos: number;
-  pulledPanels: number;
 }
 
 /** Uploads every locally-pending issue/replacement/activity-event/photo to Supabase, then
@@ -316,41 +313,12 @@ export async function pullOperationalRecords(onStatus?: (text: string) => void):
 export async function syncOperationalRecords(onStatus?: (text: string) => void): Promise<OutboxSummary> {
   const pushed = await pushOutbox(onStatus);
   const pulled = await pullOperationalRecords(onStatus);
-  let pulledPanels = 0;
-  try {
-    // Catches panel changes that aren't tied to any issue/replacement -- historical Excel
-    // corrections, field location fixes, etc. -- which pullOperationalRecords has no way to
-    // know about on its own (it only re-fetches panels REFERENCED by newly-pulled issues/
-    // replacements). Cheap: only pulls what changed since this device's own last checkpoint,
-    // not the whole ~378k-row table -- unless a whole-table event (a full "Push local data")
-    // is detected, in which case it falls back to the full pull internally and reports real
-    // progress here too, so a big catch-up shows a moving percentage instead of a stuck-looking
-    // status line.
-    pulledPanels = await pullPanelsUpdatedSince((p) => {
-      const pct = p.total > 0 ? Math.round((p.done / p.total) * 100) : 0;
-      onStatus?.(`Catching up on panel changes... ${pct}%`);
-    });
-  } catch (err) {
-    console.error('Downloading updated panels failed:', err);
-  }
   try {
     onStatus?.('Downloading tracker GPS data...');
     await pullTrackerPicas();
   } catch (err) {
     // Don't fail the whole sync cycle over this -- GPS lookup is a bonus feature, not core.
     console.error('Downloading tracker picas failed:', err);
-  }
-  try {
-    // The admin PIN is shared across every device (not a purely local browser setting) so a
-    // PIN set on one device protects all of them, including a brand new device/person that
-    // never had a chance to configure one -- the server is the source of truth whenever a
-    // shared value exists.
-    const sharedPin = await pullAdminPinHash();
-    if (sharedPin !== undefined && sharedPin !== useSettings.getState().adminPin) {
-      useSettings.getState().setAdminPin(sharedPin);
-    }
-  } catch (err) {
-    console.error('Downloading shared admin PIN failed:', err);
   }
   return {
     pushedIssues: pushed.issues,
@@ -361,7 +329,6 @@ export async function syncOperationalRecords(onStatus?: (text: string) => void):
     pulledReplacements: pulled.replacements,
     pulledEvents: pulled.events,
     pulledPhotos: pulled.photos,
-    pulledPanels,
   };
 }
 

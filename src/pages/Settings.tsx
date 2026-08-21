@@ -1,7 +1,5 @@
 import { useState } from 'react';
 import { sha256Hex } from '@/lib/hash';
-import { requireAdminPin } from '@/lib/adminPin';
-import { pushAdminPinHash } from '@/lib/adminPinSync';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { Link } from 'react-router-dom';
 import { db, clearPanelData, setDataSource } from '@/lib/db';
@@ -11,7 +9,6 @@ import { newId } from '@/lib/id';
 import { hasSupabase } from '@/lib/supabase';
 import { pushLocationsAndPanels, type SyncProgress } from '@/lib/sync';
 import { parseHistoricalReplacementsFile, applyHistoricalReplacements, removeHistoricalReplacementRecords, findSuspectSerials, type HistoricalApplyResult, type HistoricalCleanupResult, type SuspectSerial, type HistoricalRow } from '@/lib/historicalReplacements';
-import { logImportEvent } from '@/lib/importCommit';
 
 export default function Settings() {
   const operators = useLiveQuery(() => db.operators.toArray(), [], []);
@@ -79,7 +76,6 @@ export default function Settings() {
   const [auditResult, setAuditResult] = useState<SuspectSerial[] | null>(null);
 
   async function handleAudit() {
-    if (!(await requireAdminPin(adminPin, setAdminPin))) return;
     setAuditBusy(true);
     setAuditResult(null);
     try {
@@ -92,7 +88,6 @@ export default function Settings() {
   }
 
   async function handleCleanup() {
-    if (!(await requireAdminPin(adminPin, setAdminPin))) return;
     setCleanupError(null);
     setCleanupResult(null);
     const confirmed = confirm(
@@ -112,7 +107,6 @@ export default function Settings() {
   }
 
   async function handleHistoricalFile(file: File) {
-    if (!(await requireAdminPin(adminPin, setAdminPin))) return;
     setHistError(null);
     setHistResult(null);
     setHistBusy(true);
@@ -129,12 +123,6 @@ export default function Settings() {
       setHistResult(result);
       setHistPreviewRows(null);
       setHistPreviewChecks(null);
-      if (operatorId) {
-        await logImportEvent(
-          operatorId,
-          `Apply historical replacements (${file.name}): ${result.matched} matched, ${result.vacated} marked vacant, ${result.relocatedFrom} relocated-from, ${result.notFound.length} not found`
-        );
-      }
     } catch (err) {
       setHistError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -145,11 +133,10 @@ export default function Settings() {
   const [pushDone, setPushDone] = useState(false);
 
   async function handlePush() {
-    if (!(await requireAdminPin(adminPin, setAdminPin))) return;
     setPushError(null);
     setPushDone(false);
     const confirmed = confirm(
-      "⚠ This OVERWRITES every location and panel on the shared server with whatever is on THIS device right now -- including wiping out any newer changes other devices or historical Excel imports have already pushed, if this device's local copy doesn't have them too. Only use this for the very first setup, or if you've just confirmed (e.g. via Records → Vacant) that THIS device's data is the most complete and correct version. When in doubt, use \"Re-download all locations & panels\" on the Sync page instead -- that pulls the server's data down, it never pushes local data up. Continue?"
+      "This uploads every location and panel on THIS device to the shared Supabase project, so every other device can see the same real data. Only run this from the device that has the real imported Excel data. It can take a couple of minutes. Continue?"
     );
     if (!confirmed) return;
     try {
@@ -170,12 +157,24 @@ export default function Settings() {
   }
 
   async function toggleOperator(id: string, active: boolean) {
-    if (!(await requireAdminPin(adminPin, setAdminPin))) return;
     await db.operators.update(id, { active: !active });
   }
 
   async function resetAllPanelData() {
-    if (!(await requireAdminPin(adminPin, setAdminPin, 'Enter admin PIN to reset all panel data:'))) return;
+    if (adminPin) {
+      const entered = prompt('Enter admin PIN to reset all panel data:');
+      if (entered == null) return;
+      // Accept the new hashed format or (one-time) the old plain-text format, quietly
+      // upgrading it to a hash so nobody gets locked out by this change.
+      if ((await sha256Hex(entered)) === adminPin) {
+        // ok
+      } else if (entered === adminPin) {
+        setAdminPin(await sha256Hex(entered));
+      } else {
+        alert('Incorrect PIN.');
+        return;
+      }
+    }
     const confirmed = confirm(
       'This deletes ALL panels, locations, issues, replacements and activity history on THIS device/URL. Operators are kept. This cannot be undone. Continue?'
     );
@@ -188,7 +187,7 @@ export default function Settings() {
   return (
     <div className="flex flex-col gap-6 pb-20">
       <div>
-        <h1 className="font-display text-xl font-bold tracking-tight text-slate-50">Settings</h1>
+        <h1 className="text-lg font-semibold text-slate-100">Settings</h1>
         <p className="text-xs text-slate-500">
           Build:{' '}
           {typeof __BUILD_TIME__ !== 'undefined' && __BUILD_TIME__
@@ -205,13 +204,7 @@ export default function Settings() {
             onChange={(e) => setName(e.target.value)}
             className="flex-1 rounded-lg border border-border bg-bg px-3 py-2 text-sm text-slate-100"
           />
-          <button
-            onClick={async () => {
-              if (!(await requireAdminPin(adminPin, setAdminPin))) return;
-              setAppName(name);
-            }}
-            className="rounded-lg btn-primary px-4 py-2 text-sm font-semibold text-white"
-          >
+          <button onClick={() => setAppName(name)} className="rounded-lg bg-accent-blue px-4 py-2 text-sm font-semibold text-white">
             Save
           </button>
         </div>
@@ -272,19 +265,8 @@ export default function Settings() {
             className="flex-1 rounded-lg border border-border bg-bg px-3 py-2 text-sm text-slate-100"
           />
           <button
-            onClick={async () => {
-              if (!(await requireAdminPin(adminPin, setAdminPin, 'Enter the CURRENT admin PIN to change it:'))) return;
-              const newHash = pin ? await sha256Hex(pin) : null;
-              setAdminPin(newHash);
-              try {
-                await pushAdminPinHash(newHash);
-              } catch (err) {
-                alert(
-                  `Saved on this device, but couldn't reach the shared server (${err instanceof Error ? err.message : String(err)}) -- other devices won't get this PIN until it syncs.`
-                );
-              }
-            }}
-            className="rounded-lg btn-primary px-4 py-2 text-sm font-semibold text-white"
+            onClick={async () => setAdminPin(pin ? await sha256Hex(pin) : null)}
+            className="rounded-lg bg-accent-blue px-4 py-2 text-sm font-semibold text-white"
           >
             Save
           </button>
@@ -308,11 +290,8 @@ export default function Settings() {
             className="w-24 rounded-lg border border-border bg-bg px-3 py-2 text-sm text-slate-100"
           />
           <button
-            onClick={async () => {
-              if (!(await requireAdminPin(adminPin, setAdminPin))) return;
-              setVoltageRange(Number(vMin), Number(vMax));
-            }}
-            className="rounded-lg btn-primary px-4 py-2 text-sm font-semibold text-white"
+            onClick={() => setVoltageRange(Number(vMin), Number(vMax))}
+            className="rounded-lg bg-accent-blue px-4 py-2 text-sm font-semibold text-white"
           >
             Save
           </button>
@@ -348,7 +327,7 @@ export default function Settings() {
                 </div>
               </div>
             ) : (
-              <button onClick={handlePush} className="rounded-lg btn-primary px-4 py-2 text-sm font-semibold text-white">
+              <button onClick={handlePush} className="rounded-lg bg-accent-blue px-4 py-2 text-sm font-semibold text-white">
                 Push local data to Supabase
               </button>
             )}
@@ -369,14 +348,6 @@ export default function Settings() {
         {histError && <div className="mb-3 rounded-lg bg-status-pending/20 p-2 text-xs text-status-pending">{histError}</div>}
         {histResult && (
           <div className="mb-3 flex flex-col gap-2 rounded-lg border border-border p-3 text-xs">
-            {histResult.pushFailed ? (
-              <div className="rounded-lg border border-status-pending bg-status-pending/10 p-2 text-status-pending">
-                ⚠ Saved on this device, but couldn't reach the shared server just now (no connection?) -- other
-                devices won't see this until it syncs. It'll retry automatically, or tap "Sync now" on the Sync page.
-              </div>
-            ) : (
-              <div className="text-status-replaced">✓ Uploaded to the shared server -- other devices will see this on their next sync.</div>
-            )}
             <div className="text-status-replaced">✓ {histResult.matched} panel(s) updated.</div>
             {histResult.vacated > 0 && (
               <div className="text-status-pending">
@@ -410,7 +381,7 @@ export default function Settings() {
             {histProgress ? `Processing ${histProgress.done} / ${histProgress.total}...` : 'Reading file...'}
           </p>
         ) : (
-          <label className="inline-block cursor-pointer rounded-lg btn-primary px-4 py-2 text-sm font-semibold text-white">
+          <label className="inline-block cursor-pointer rounded-lg bg-accent-blue px-4 py-2 text-sm font-semibold text-white">
             Choose Excel file
             <input
               type="file"
@@ -444,7 +415,7 @@ export default function Settings() {
             </p>
             <button
               onClick={() => histFile && handleHistoricalFile(histFile)}
-              className="self-start rounded-lg btn-primary px-4 py-2 text-sm font-semibold text-white"
+              className="self-start rounded-lg bg-accent-blue px-4 py-2 text-sm font-semibold text-white"
             >
               Looks right -- run the full update
             </button>

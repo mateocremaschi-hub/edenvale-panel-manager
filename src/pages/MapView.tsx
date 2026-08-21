@@ -39,7 +39,7 @@ export default function MapView() {
 
   return (
     <div>
-      <h1 className="mb-1 font-display text-xl font-bold tracking-tight text-slate-50">Map</h1>
+      <h1 className="mb-1 text-lg font-semibold text-slate-100">Map</h1>
       <p className="mb-4 text-sm text-slate-500">
         Farm overview. Select a block, then "View real plan" for the actual CAD layout with clickable
         strings (Etapa 2).
@@ -73,7 +73,7 @@ export default function MapView() {
               </div>
               <button
                 onClick={() => navigate(`/map/block/${selectedBlock}`)}
-                className="mt-3 rounded-lg btn-primary px-4 py-2 text-sm font-semibold text-white"
+                className="mt-3 rounded-lg bg-accent-blue px-4 py-2 text-sm font-semibold text-white"
               >
                 View real plan →
               </button>

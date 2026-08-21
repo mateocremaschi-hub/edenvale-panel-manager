@@ -3,7 +3,6 @@ import { db } from './db';
 import { newId } from './id';
 import { nowIso } from './time';
 import { getSupabase } from './supabase';
-import { pushPanelsById } from './sync';
 import { looksLikeRealSerial } from './panelDisplay';
 import type { ActivityEvent } from './types';
 
@@ -61,7 +60,6 @@ export interface HistoricalApplyResult {
   relocatedFrom: number; // "after" was found installed elsewhere -- that ORIGIN location marked vacant too
   notFound: string[]; // "before" serials that don't exist as a current panel
   alreadyCurrent: string[]; // "before" serial IS a panel, but its serial already equals "after" (re-run, no-op)
-  pushFailed?: boolean; // changes saved locally but couldn't reach the shared server -- will retry on next sync
 }
 
 /** Reads the "Serial Number (Before)" / "Serial Number (After)" / "Type of module" columns from
@@ -131,42 +129,9 @@ export async function applyHistoricalReplacements(
 ): Promise<HistoricalApplyResult> {
   const result: HistoricalApplyResult = { matched: 0, vacated: 0, relocatedFrom: 0, notFound: [], alreadyCurrent: [] };
 
-  // Some spreadsheets document one physical relocation as TWO separate rows: one row saying
-  // "before=X, after=To be installed" (X was taken away from here), and another saying
-  // "before=Y, after=X" (X was installed here, replacing Y) -- often with a comment like
-  // "installed from damage tracker". The second row ALREADY finds and vacates X's true current
-  // location on its own (the relocatedFrom logic below), so the first row is redundant -- and
-  // acting on it directly is actively risky, because ROW ORDER then matters: if the "before=X,
-  // after=To be installed" row runs first, it vacates wherever X is RIGHT NOW; if the "after=X"
-  // row hasn't run yet, that's correct, but if it already HAS run, X has already moved to Y's
-  // old spot, so the "before=X" row would wrongly vacate the NEW (correct) location instead.
-  // Fix: pre-scan every row's "after" value that looks like a real serial -- if some OTHER row
-  // in this same file already claims that serial as its destination, a bare "before=<that
-  // serial>, after=<not a real serial>" row is redundant and is skipped entirely, regardless of
-  // which row happens to run first. Only a genuine standalone case (damaged and never
-  // reinstalled, or "to be installed" with no known destination yet in this file) still vacates.
-  const claimedAsAfter = new Set<string>();
-  for (const r of rows) {
-    if (looksLikeRealSerial(r.after)) claimedAsAfter.add(r.after.trim());
-  }
-
-  // Every panelId this run actually writes to -- pushed to the shared server automatically at
-  // the end, so this doesn't silently stay local-only until someone remembers to also tap
-  // "Push local data to Supabase" in Settings (that button is really for the one-time initial
-  // bulk load of the whole 377k-row table, not something to re-run after every reconciliation
-  // Excel).
-  const touchedPanelIds: string[] = [];
-
   for (let i = 0; i < rows.length; i++) {
     const { before, after, moduleType } = rows[i];
     onProgress?.(i + 1, rows.length);
-
-    const isVacating = !looksLikeRealSerial(after);
-    if (isVacating && claimedAsAfter.has(before.trim())) {
-      // Redundant -- another row in this same file documents where `before` actually went;
-      // that row's own relocation check will vacate this position correctly on its own.
-      continue;
-    }
 
     const destPanel = await db.panels.where('serialNumber').equals(before).first();
     if (!destPanel) {
@@ -174,6 +139,7 @@ export async function applyHistoricalReplacements(
       continue;
     }
 
+    const isVacating = !looksLikeRealSerial(after);
     const destAlreadyMatches = destPanel.serialNumber === after;
 
     if (destAlreadyMatches) {
@@ -198,7 +164,6 @@ export async function applyHistoricalReplacements(
         await db.panels.update(destPanel.panelId, { serialNumber: newSerial, status: isVacating ? 'vacant' : 'normal' });
         await db.activityEvents.add(destEvent);
       });
-      touchedPanelIds.push(destPanel.panelId);
       if (isVacating) result.vacated++;
       else result.matched++;
     }
@@ -226,21 +191,8 @@ export async function applyHistoricalReplacements(
           await db.panels.update(originPanel.panelId, { serialNumber: `VACANT-${originPanel.locationId}`, status: 'vacant' });
           await db.activityEvents.add(originEvent);
         });
-        touchedPanelIds.push(originPanel.panelId);
         result.relocatedFrom++;
       }
-    }
-  }
-
-  if (touchedPanelIds.length > 0) {
-    try {
-      await pushPanelsById(touchedPanelIds);
-    } catch (err) {
-      // Don't fail the whole import over a network hiccup -- the changes are safely saved
-      // locally either way, and the regular sync cycle will retry pushing them soon. Surface
-      // it in the result so the UI can at least warn rather than silently claiming success.
-      console.error('Pushing historical-replacement changes to the shared server failed (will retry on next sync):', err);
-      result.pushFailed = true;
     }
   }
 
@@ -269,69 +221,4 @@ export async function findSuspectSerials(onProgress?: (scanned: number, total: n
   }
   onProgress?.(all.length, all.length);
   return suspects;
-}
-
-export interface LocationConflict {
-  locationId: string;
-  serialNumber: string;
-}
-
-/**
- * Field correction: a technician scanned/found a REAL panel (serial) and confirms it's
- * physically at newLocationId -- but the database has it recorded elsewhere (wrong location
- * from an import error) or nowhere at all. Moves it there: sets newLocationId's panel to this
- * serial, and if the serial was previously recorded at a DIFFERENT location, marks that old
- * location vacant (confirmed empty -- the panel that used to show there is genuinely here now).
- * If newLocationId currently holds a DIFFERENT real (non-vacant, non-matching) serial, that's a
- * genuine data conflict -- returns it as `conflict` instead of silently overwriting; the caller
- * should show a clear warning and only re-call with `force: true` after explicit confirmation.
- */
-export async function correctPanelLocation(
-  serial: string,
-  newLocationId: string,
-  operatorId: string,
-  force = false
-): Promise<{ conflict?: LocationConflict }> {
-  const destPanel = await db.panels.get(newLocationId);
-  if (!destPanel) throw new Error(`"${newLocationId}" isn't a valid panel location in this farm.`);
-
-  const destIsVacant = destPanel.serialNumber.startsWith('VACANT-');
-  if (!destIsVacant && destPanel.serialNumber !== serial && !force) {
-    return { conflict: { locationId: newLocationId, serialNumber: destPanel.serialNumber } };
-  }
-
-  const oldPanel = await db.panels.where('serialNumber').equals(serial).first();
-
-  await db.transaction('rw', db.panels, db.activityEvents, async () => {
-    await db.panels.update(newLocationId, { serialNumber: serial, status: 'normal' });
-    await db.activityEvents.add({
-      eventId: newId('evt'),
-      entityType: 'panel',
-      entityId: newLocationId,
-      action: 'field_location_correction',
-      previousValue: destPanel.serialNumber,
-      newValue: serial,
-      operator: operatorId,
-      timestamp: nowIso(),
-      syncStatus: 'pending',
-      correctionReason: 'Confirmed in the field -- this panel is actually here.',
-    });
-    if (oldPanel && oldPanel.locationId !== newLocationId) {
-      await db.panels.update(oldPanel.locationId, { serialNumber: `VACANT-${oldPanel.locationId}`, status: 'vacant' });
-      await db.activityEvents.add({
-        eventId: newId('evt'),
-        entityType: 'panel',
-        entityId: oldPanel.locationId,
-        action: 'field_location_correction',
-        previousValue: serial,
-        newValue: `VACANT-${oldPanel.locationId}`,
-        operator: operatorId,
-        timestamp: nowIso(),
-        syncStatus: 'pending',
-        correctionReason: `Confirmed in the field -- this panel is actually at ${newLocationId}, not here.`,
-      });
-    }
-  });
-
-  return {};
 }

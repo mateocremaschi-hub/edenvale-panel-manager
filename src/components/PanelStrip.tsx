@@ -6,11 +6,6 @@ import { displaySerial } from '@/lib/panelDisplay';
 interface Props {
   title?: string;
   panels: Panel[];
-  /** Label for the left end of the strip. Defaults to "1" (legacy: raw ascending order) --
-   * BlockView passes a physical-direction label ("Near DC box") instead, since which module
-   * number sits at which end varies per string (see dronePicas.ts's piercing-connector note). */
-  nearEndLabel?: string;
-  farEndLabel?: string;
 }
 
 function panelStatusColor(status: Panel['status']): string {
@@ -31,13 +26,11 @@ function panelStatusColor(status: Panel['status']): string {
   }
 }
 
-/** Strip of a string's 28 panels, tappable one by one. By default, position order comes
- * straight from the imported Excel (locationId's module number) with ends labelled "1"/"28" --
- * but when the caller knows the real physical layout (BlockView does, via the piercing-
- * connector rule in dronePicas.ts), it passes panels pre-ordered to walk DC-box-near ->
- * DC-box-far left to right, with matching nearEndLabel/farEndLabel, so the strip always reads
- * left-to-right the same way a technician actually walks the row. */
-export default function PanelStrip({ title, panels, nearEndLabel = '1', farEndLabel = '28' }: Props) {
+/** Strip of a string's 28 panels in module order (1 to 28), tappable one by one. Position order
+ * comes straight from the imported Excel (locationId's module number), not from any drawing.
+ * Ends are labelled by position number, not compass direction -- confirmed against the real
+ * farm data that which end is physically North/South varies per string, so we don't guess. */
+export default function PanelStrip({ title, panels }: Props) {
   const navigate = useNavigate();
   const [active, setActive] = useState<Panel | null>(panels[0] ?? null);
 
@@ -62,7 +55,7 @@ export default function PanelStrip({ title, panels, nearEndLabel = '1', farEndLa
     <div>
       {title && <div className="mb-1 text-xs text-slate-400">{title}</div>}
       <div className="mb-2 flex items-center gap-2">
-        <span className="whitespace-nowrap text-xs font-semibold text-slate-400">{nearEndLabel}</span>
+        <span className="text-xs font-semibold text-slate-400">1</span>
         <div className="flex flex-1 gap-0.5">
           {panels.map((p) => {
             const pos = p.locationId.split('.').pop();
@@ -81,7 +74,7 @@ export default function PanelStrip({ title, panels, nearEndLabel = '1', farEndLa
             );
           })}
         </div>
-        <span className="whitespace-nowrap text-xs font-semibold text-slate-400">{farEndLabel}</span>
+        <span className="text-xs font-semibold text-slate-400">28</span>
       </div>
       {active && (
         <div className="flex flex-col gap-2 rounded-lg border border-border px-3 py-2 text-xs">
@@ -95,7 +88,7 @@ export default function PanelStrip({ title, panels, nearEndLabel = '1', farEndLa
           </div>
           <button
             onClick={replaceThisPanel}
-            className="rounded-lg btn-primary px-3 py-2 text-xs font-semibold text-white active:opacity-80"
+            className="rounded-lg bg-accent-blue px-3 py-2 text-xs font-semibold text-white active:opacity-80"
           >
             {active.serialNumber.startsWith('VACANT-') ? '➕ Install panel here' : '🔧 Replace this panel'}
           </button>
