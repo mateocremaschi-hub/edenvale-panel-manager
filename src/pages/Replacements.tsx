@@ -235,6 +235,9 @@ export default function Replacements() {
         setFixLocationConflict(result.conflict);
         return;
       }
+      if (result.pushFailed) {
+        setWarning('Saved locally, but couldn\'t reach the server yet -- it\'ll sync automatically once back online.');
+      }
       setFixLocationConflict(null);
       setShowFixLocation(false);
       setFixLocationCode('');
@@ -272,7 +275,11 @@ export default function Replacements() {
       // which made the regular replacement form -- new serial, photos -- appear right after,
       // as if this were step one of a two-step replacement instead of a complete action on
       // its own).
-      setSuccessMessage(`${locationId} updated -- ${serial} recorded here.`);
+      setSuccessMessage(
+        result.pushFailed
+          ? `${locationId} updated locally -- ${serial} recorded here. Couldn't reach the server yet, it'll sync once back online.`
+          : `${locationId} updated -- ${serial} recorded here.`
+      );
       setOpen(false);
       setCurrent(null);
       setShowDiscovered(false);

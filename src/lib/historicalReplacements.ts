@@ -291,7 +291,7 @@ export async function correctPanelLocation(
   newLocationId: string,
   operatorId: string,
   force = false
-): Promise<{ conflict?: LocationConflict }> {
+): Promise<{ conflict?: LocationConflict; pushFailed?: boolean }> {
   const destPanel = await db.panels.get(newLocationId);
   if (!destPanel) throw new Error(`"${newLocationId}" isn't a valid panel location in this farm.`);
 
@@ -301,6 +301,7 @@ export async function correctPanelLocation(
   }
 
   const oldPanel = await db.panels.where('serialNumber').equals(serial).first();
+  const touchedLocationIds = new Set<string>([newLocationId]);
 
   await db.transaction('rw', db.panels, db.activityEvents, async () => {
     await db.panels.update(newLocationId, { serialNumber: serial, status: 'normal' });
@@ -318,6 +319,7 @@ export async function correctPanelLocation(
     });
     if (oldPanel && oldPanel.locationId !== newLocationId) {
       await db.panels.update(oldPanel.locationId, { serialNumber: `VACANT-${oldPanel.locationId}`, status: 'vacant' });
+      touchedLocationIds.add(oldPanel.locationId);
       await db.activityEvents.add({
         eventId: newId('evt'),
         entityType: 'panel',
@@ -332,6 +334,19 @@ export async function correctPanelLocation(
       });
     }
   });
+
+  // The local write above is real and already correct -- but without this, it stays trapped on
+  // THIS device until something else (a full "Push local data to Supabase", or another sync
+  // path touching the same panel) happens to carry it along. Confirmed as the root cause of a
+  // real report: a field correction made on one phone was still invisible on another device a
+  // full day later, through multiple reloads -- this function had never pushed at all. Same
+  // pattern, same fix shape as the earlier applyHistoricalReplacements auto-push gap.
+  try {
+    await pushPanelsById(Array.from(touchedLocationIds));
+  } catch (err) {
+    console.error('Pushing the corrected panel location failed:', err);
+    return { pushFailed: true };
+  }
 
   return {};
 }
