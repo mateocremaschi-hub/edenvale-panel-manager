@@ -61,8 +61,8 @@ export default function PanelStrip({ title, panels, nearEndLabel = '1', farEndLa
   return (
     <div>
       {title && <div className="mb-1 text-xs text-slate-400">{title}</div>}
-      <div className="mb-2 flex items-center gap-2">
-        <span className="whitespace-nowrap text-xs font-semibold text-slate-400">{nearEndLabel}</span>
+      <div className="mb-2 flex items-center gap-1.5">
+        {nearEndLabel && <span className="whitespace-nowrap text-[10px] font-semibold text-slate-400">{nearEndLabel}</span>}
         <div className="flex flex-1 gap-0.5">
           {panels.map((p) => {
             const pos = p.locationId.split('.').pop();
@@ -81,7 +81,7 @@ export default function PanelStrip({ title, panels, nearEndLabel = '1', farEndLa
             );
           })}
         </div>
-        <span className="whitespace-nowrap text-xs font-semibold text-slate-400">{farEndLabel}</span>
+        {farEndLabel && <span className="whitespace-nowrap text-[10px] font-semibold text-slate-400">{farEndLabel}</span>}
       </div>
       {active && (
         <div className="flex flex-col gap-2 rounded-lg border border-border px-3 py-2 text-xs">

@@ -46,6 +46,7 @@ export default function Replacements() {
   const [notes, setNotes] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [warning, setWarning] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [scannerMode, setScannerMode] = useState<'removed' | 'new' | 'discovered' | null>(null);
   const [photos, setPhotos] = useState<PendingPhoto[]>([]);
@@ -258,18 +259,25 @@ export default function Replacements() {
       setDiscoveredError('Scan or type the serial number of the panel that\'s actually here.');
       return;
     }
+    const locationId = current.locationId;
     setDiscoveredBusy(true);
     try {
-      const result = await correctPanelLocation(serial, current.locationId, operatorId!, force);
+      const result = await correctPanelLocation(serial, locationId, operatorId!, force);
       if (result.conflict) {
         setDiscoveredConflict(result.conflict);
         return;
       }
-      setDiscoveredConflict(null);
+      // Done -- this already recorded the panel at this location. Close the whole form
+      // instead of reloading it (reloading used to bring back a now-non-vacant `current`,
+      // which made the regular replacement form -- new serial, photos -- appear right after,
+      // as if this were step one of a two-step replacement instead of a complete action on
+      // its own).
+      setSuccessMessage(`${locationId} updated -- ${serial} recorded here.`);
+      setOpen(false);
+      setCurrent(null);
       setShowDiscovered(false);
+      setDiscoveredConflict(null);
       setDiscoveredSerial('');
-      // Re-load this location so the form reflects the correction (no longer vacant).
-      await loadPanelByLocation();
     } catch (err) {
       setDiscoveredError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -471,7 +479,10 @@ export default function Replacements() {
       <div className="mb-4 flex items-center justify-between">
         <h1 className="font-display text-xl font-bold tracking-tight text-slate-50">Replacements</h1>
         <button
-          onClick={() => setOpen(true)}
+          onClick={() => {
+            setOpen(true);
+            setSuccessMessage(null);
+          }}
           className="rounded-xl btn-primary px-4 py-2 text-sm font-semibold text-white active:opacity-80"
         >
           + New replacement
@@ -484,6 +495,12 @@ export default function Replacements() {
           onResult={handleScanResult}
           onClose={() => setScannerMode(null)}
         />
+      )}
+
+      {successMessage && (
+        <div className="mb-4 rounded-xl border border-status-replaced/40 bg-status-replaced/10 p-3 text-sm text-status-replaced">
+          ✓ {successMessage}
+        </div>
       )}
 
       {open && (

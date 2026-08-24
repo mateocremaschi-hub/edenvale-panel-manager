@@ -165,8 +165,8 @@ export default function BlockView() {
 
     return {
       panels: walksAscending ? ascending : [...ascending].reverse(),
-      nearEndLabel: '⚡ Near DC box',
-      farEndLabel: 'Far end',
+      nearEndLabel: 'DC box',
+      farEndLabel: '',
     };
   }
 
