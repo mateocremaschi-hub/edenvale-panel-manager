@@ -162,7 +162,9 @@ export interface Operator {
 
 export interface Photo {
   photoId: string;
-  relatedType: 'issue' | 'replacement';
+  // 'installation' is a vacant-slot install -- kept separate from 'replacement' since it has no
+  // corresponding db.replacements row (see Replacements.tsx's confirmReplacement).
+  relatedType: 'issue' | 'replacement' | 'installation';
   relatedId: string;
   blob: Blob;
   takenAt: string;

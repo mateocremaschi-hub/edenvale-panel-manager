@@ -50,7 +50,7 @@ export default function SearchPage() {
 
   return (
     <div>
-      <h1 className="mb-4 text-lg font-semibold text-slate-100">{t('nav_search')}</h1>
+      <h1 className="mb-4 font-display text-xl font-bold tracking-tight text-slate-50">{t('nav_search')}</h1>
       <input
         autoFocus
         value={query}

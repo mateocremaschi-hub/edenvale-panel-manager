@@ -8,6 +8,7 @@ import { newId } from '@/lib/id';
 import { nowIso, formatDateTime } from '@/lib/time';
 import { compressImage } from '@/lib/photo';
 import { generateReplacementsPdf } from '@/lib/pdfReport';
+import { correctPanelLocation, type LocationConflict } from '@/lib/historicalReplacements';
 import type { Replacement, Photo } from '@/lib/types';
 import BarcodeScanner from '@/components/BarcodeScanner';
 
@@ -46,7 +47,7 @@ export default function Replacements() {
   const [error, setError] = useState<string | null>(null);
   const [warning, setWarning] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [scannerMode, setScannerMode] = useState<'removed' | 'new' | null>(null);
+  const [scannerMode, setScannerMode] = useState<'removed' | 'new' | 'discovered' | null>(null);
   const [photos, setPhotos] = useState<PendingPhoto[]>([]);
   const [current, setCurrent] = useState<{
     locationId: string;
@@ -56,6 +57,22 @@ export default function Replacements() {
     issueId?: string;
   } | null>(null);
   const isVacantSlot = current?.serial.startsWith('VACANT-') ?? false;
+
+  // "This isn't where I am" -- correct a scanned panel's recorded location.
+  const [showFixLocation, setShowFixLocation] = useState(false);
+  const [fixLocationCode, setFixLocationCode] = useState('');
+  const [fixLocationPos, setFixLocationPos] = useState('');
+  const [fixLocationBusy, setFixLocationBusy] = useState(false);
+  const [fixLocationError, setFixLocationError] = useState<string | null>(null);
+  const [fixLocationConflict, setFixLocationConflict] = useState<LocationConflict | null>(null);
+
+  // "Actually, there's already a panel here" -- a slot marked vacant turns out to have a real
+  // panel physically in place; record its real serial instead of treating this as a fresh install.
+  const [showDiscovered, setShowDiscovered] = useState(false);
+  const [discoveredSerial, setDiscoveredSerial] = useState('');
+  const [discoveredBusy, setDiscoveredBusy] = useState(false);
+  const [discoveredError, setDiscoveredError] = useState<string | null>(null);
+  const [discoveredConflict, setDiscoveredConflict] = useState<LocationConflict | null>(null);
 
   const [blockFilter, setBlockFilter] = useState('');
   const [search, setSearch] = useState('');
@@ -197,6 +214,69 @@ export default function Replacements() {
     setReconcilePosition('');
   }
 
+  /** "This isn't where I am" -- the scanned panel WAS found in our records, but at a
+   * different recorded location than where the technician is actually standing (an import
+   * error). Moves it to the location they confirm, vacating wherever it was wrongly recorded. */
+  async function fixCurrentLocation(force = false) {
+    if (!current) return;
+    setFixLocationError(null);
+    const code = fixLocationCode.trim();
+    const pos = Number(fixLocationPos);
+    if (!code || !fixLocationPos || !Number.isInteger(pos) || pos < 1 || pos > 28) {
+      setFixLocationError('Enter the string code and a panel position from 1 to 28.');
+      return;
+    }
+    const newLocationId = `${code}.${pos}`;
+    setFixLocationBusy(true);
+    try {
+      const result = await correctPanelLocation(current.serial, newLocationId, operatorId!, force);
+      if (result.conflict) {
+        setFixLocationConflict(result.conflict);
+        return;
+      }
+      setFixLocationConflict(null);
+      setShowFixLocation(false);
+      setFixLocationCode('');
+      setFixLocationPos('');
+      // Re-load this panel so the form reflects its corrected location.
+      await lookupBySerial(current.serial);
+    } catch (err) {
+      setFixLocationError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setFixLocationBusy(false);
+    }
+  }
+
+  /** "Actually, there's already a panel here" -- this slot is marked vacant, but a real panel
+   * is physically in place. Records its real serial here instead of treating this as a fresh
+   * install (and vacates wherever that serial was wrongly recorded, if anywhere). */
+  async function confirmDiscoveredPanel(force = false) {
+    if (!current) return;
+    setDiscoveredError(null);
+    const serial = discoveredSerial.trim();
+    if (!serial) {
+      setDiscoveredError('Scan or type the serial number of the panel that\'s actually here.');
+      return;
+    }
+    setDiscoveredBusy(true);
+    try {
+      const result = await correctPanelLocation(serial, current.locationId, operatorId!, force);
+      if (result.conflict) {
+        setDiscoveredConflict(result.conflict);
+        return;
+      }
+      setDiscoveredConflict(null);
+      setShowDiscovered(false);
+      setDiscoveredSerial('');
+      // Re-load this location so the form reflects the correction (no longer vacant).
+      await loadPanelByLocation();
+    } catch (err) {
+      setDiscoveredError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setDiscoveredBusy(false);
+    }
+  }
+
   function handleScanResult(text: string) {
     const mode = scannerMode;
     setScannerMode(null);
@@ -204,6 +284,8 @@ export default function Replacements() {
       lookupBySerial(text);
     } else if (mode === 'new') {
       setNewSerial(text);
+    } else if (mode === 'discovered') {
+      setDiscoveredSerial(text);
     }
   }
 
@@ -254,14 +336,20 @@ export default function Replacements() {
 
     setSaving(true);
     try {
-      const replacementId = newId('rep');
+      // A vacant-slot install ("Confirm this panel is here" / "Confirm installation") is NOT a
+      // replacement -- there was no panel to remove, just a correction that this location isn't
+      // actually empty. Keeping it out of db.replacements (and out of the Replacements list/
+      // PDF reports built from that table) is the whole point here -- it still gets a durable
+      // audit trail via activityEvents (action: 'panel_installed', already existed) and via the
+      // panel record itself, just not presented or stored as if a swap happened.
+      const recordId = newId(isVacantSlot ? 'inst' : 'rep');
       const photoRecords: Photo[] = await Promise.all(
         photos.map(async (p) => {
           const blob = await compressImage(p.file);
           return {
             photoId: newId('photo'),
-            relatedType: 'replacement' as const,
-            relatedId: replacementId,
+            relatedType: isVacantSlot ? ('installation' as const) : ('replacement' as const),
+            relatedId: recordId,
             blob,
             takenAt: nowIso(),
             author: operatorId!,
@@ -270,27 +358,29 @@ export default function Replacements() {
           };
         })
       );
-      const rec: Replacement = {
-        replacementId,
-        locationId: current.locationId,
-        removedPanelId: current.panelId,
-        removedSerial: isVacantSlot ? '(none -- new install, no panel was here)' : current.serial,
-        installedPanelId: current.panelId, // the physical location id stays stable across serials
-        installedSerial: serial,
-        oldVoltage: isVacantSlot ? undefined : current.voltage,
-        newVoltage: voltageNum,
-        replacementDate: nowIso(),
-        replacedBy: operatorId!,
-        replacedByName: replacedByName.trim(),
-        sunManagerId: sunManagerId || undefined,
-        reason,
-        relatedIssueId: current.issueId,
-        photoIds: photoRecords.map((p) => p.photoId),
-        notes,
-        syncStatus: 'pending',
-      };
       await db.transaction('rw', db.replacements, db.panels, db.issues, db.activityEvents, db.photos, async () => {
-        await db.replacements.add(rec);
+        if (!isVacantSlot) {
+          const rec: Replacement = {
+            replacementId: recordId,
+            locationId: current.locationId,
+            removedPanelId: current.panelId,
+            removedSerial: current.serial,
+            installedPanelId: current.panelId, // the physical location id stays stable across serials
+            installedSerial: serial,
+            oldVoltage: current.voltage,
+            newVoltage: voltageNum,
+            replacementDate: nowIso(),
+            replacedBy: operatorId!,
+            replacedByName: replacedByName.trim(),
+            sunManagerId: sunManagerId || undefined,
+            reason,
+            relatedIssueId: current.issueId,
+            photoIds: photoRecords.map((p) => p.photoId),
+            notes,
+            syncStatus: 'pending',
+          };
+          await db.replacements.add(rec);
+        }
         if (photoRecords.length) await db.photos.bulkAdd(photoRecords);
         await db.panels.update(current.panelId, {
           serialNumber: serial,
@@ -310,8 +400,13 @@ export default function Replacements() {
         }
         await db.activityEvents.add({
           eventId: newId('evt'),
-          entityType: 'replacement',
-          entityId: replacementId,
+          // 'panel' (not 'replacement') for a vacant-slot install -- there's no replacements
+          // row for this event to reference, so entityType: 'replacement' would point at
+          // nothing. historicalReplacements.ts's cleanup tool specifically looks up events by
+          // entityType==='replacement' matched against real db.replacements ids -- keeping
+          // installs out of that entityType keeps them correctly untouched by that cleanup.
+          entityType: isVacantSlot ? 'panel' : 'replacement',
+          entityId: isVacantSlot ? current.panelId : recordId,
           action: isVacantSlot ? 'panel_installed' : 'replacement_confirmed',
           previousValue: isVacantSlot ? undefined : current.serial,
           newValue: serial,
@@ -374,10 +469,10 @@ export default function Replacements() {
   return (
     <div>
       <div className="mb-4 flex items-center justify-between">
-        <h1 className="text-lg font-semibold text-slate-100">Replacements</h1>
+        <h1 className="font-display text-xl font-bold tracking-tight text-slate-50">Replacements</h1>
         <button
           onClick={() => setOpen(true)}
-          className="rounded-xl bg-accent-blue px-4 py-2 text-sm font-semibold text-white active:opacity-80"
+          className="rounded-xl btn-primary px-4 py-2 text-sm font-semibold text-white active:opacity-80"
         >
           + New replacement
         </button>
@@ -385,7 +480,7 @@ export default function Replacements() {
 
       {scannerMode && (
         <BarcodeScanner
-          title={scannerMode === 'removed' ? 'Scan the panel being removed' : 'Scan the new panel'}
+          title={scannerMode === 'removed' ? 'Scan the panel being removed' : scannerMode === 'discovered' ? 'Scan the panel that\'s actually here' : 'Scan the new panel'}
           onResult={handleScanResult}
           onClose={() => setScannerMode(null)}
         />
@@ -482,7 +577,7 @@ export default function Replacements() {
                     <div className="flex gap-2">
                       <button
                         onClick={registerFieldDiscrepancy}
-                        className="rounded-lg bg-accent-blue px-4 py-2 text-sm font-semibold text-white"
+                        className="rounded-lg btn-primary px-4 py-2 text-sm font-semibold text-white"
                       >
                         Register what's actually there
                       </button>
@@ -510,6 +605,130 @@ export default function Replacements() {
                   {current.locationId} {!isVacantSlot && current.voltage ? `· ${current.voltage.toFixed(2)}V` : ''}
                 </div>
               </div>
+
+              {!isVacantSlot && !showFixLocation && (
+                <button onClick={() => setShowFixLocation(true)} className="self-start text-xs text-accent-blue underline">
+                  Not the right spot? Fix this panel's recorded location
+                </button>
+              )}
+              {!isVacantSlot && showFixLocation && (
+                <div className="rounded-lg border border-status-pending/40 bg-status-pending/5 p-3 text-xs">
+                  <p className="mb-2 text-slate-300">
+                    Where is <span className="font-mono">{current.serial}</span> actually? Enter the string it's on and its
+                    position (1-28) -- this will move it there and mark {current.locationId} empty.
+                  </p>
+                  <div className="mb-2 flex gap-2">
+                    <input
+                      value={fixLocationCode}
+                      onChange={(e) => setFixLocationCode(e.target.value)}
+                      placeholder="String code, e.g. S-5.1.2.2.3"
+                      className="flex-1 rounded-lg border border-border bg-bg px-2 py-1.5 text-slate-100"
+                    />
+                    <input
+                      value={fixLocationPos}
+                      onChange={(e) => setFixLocationPos(e.target.value)}
+                      placeholder="Pos"
+                      className="w-16 rounded-lg border border-border bg-bg px-2 py-1.5 text-slate-100"
+                    />
+                  </div>
+                  {fixLocationError && <div className="mb-2 text-status-pending">{fixLocationError}</div>}
+                  {fixLocationConflict && (
+                    <div className="mb-2 rounded-lg border border-status-pending bg-status-pending/10 p-2 text-status-pending">
+                      ⚠ {fixLocationConflict.locationId} already shows a different panel on record (
+                      <span className="font-mono">{fixLocationConflict.serialNumber}</span>). Moving this one there anyway will
+                      mark THAT serial's number as no longer confirmed here -- are you sure?
+                      <button
+                        onClick={() => fixCurrentLocation(true)}
+                        disabled={fixLocationBusy}
+                        className="mt-2 block rounded-lg bg-status-pending px-3 py-1.5 font-semibold text-white disabled:opacity-40"
+                      >
+                        Yes, move it here anyway
+                      </button>
+                    </div>
+                  )}
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => fixCurrentLocation(false)}
+                      disabled={fixLocationBusy}
+                      className="rounded-lg bg-accent-blue px-3 py-1.5 font-semibold text-white disabled:opacity-40"
+                    >
+                      {fixLocationBusy ? 'Saving...' : 'Confirm correct location'}
+                    </button>
+                    <button
+                      onClick={() => {
+                        setShowFixLocation(false);
+                        setFixLocationConflict(null);
+                        setFixLocationError(null);
+                      }}
+                      className="rounded-lg border border-border px-3 py-1.5 text-slate-300"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {isVacantSlot && !showDiscovered && (
+                <button onClick={() => setShowDiscovered(true)} className="self-start text-xs text-accent-blue underline">
+                  Actually, there's already a panel here
+                </button>
+              )}
+              {isVacantSlot && showDiscovered && (
+                <div className="rounded-lg border border-status-pending/40 bg-status-pending/5 p-3 text-xs">
+                  <p className="mb-2 text-slate-300">
+                    Scan or type the serial of the panel that's really at {current.locationId} -- this records it here instead
+                    of treating this as a fresh install.
+                  </p>
+                  <div className="mb-2 flex gap-2">
+                    <input
+                      value={discoveredSerial}
+                      onChange={(e) => setDiscoveredSerial(e.target.value)}
+                      placeholder="Serial number"
+                      className="flex-1 rounded-lg border border-border bg-bg px-2 py-1.5 text-slate-100"
+                    />
+                    <button
+                      onClick={() => setScannerMode('discovered')}
+                      className="rounded-lg border border-accent-blue px-3 py-1.5 text-accent-blue"
+                      title="Scan panel barcode"
+                    >
+                      📷
+                    </button>
+                  </div>
+                  {discoveredError && <div className="mb-2 text-status-pending">{discoveredError}</div>}
+                  {discoveredConflict && (
+                    <div className="mb-2 rounded-lg border border-status-pending bg-status-pending/10 p-2 text-status-pending">
+                      ⚠ That serial is currently recorded at {discoveredConflict.locationId}. Confirming it's actually here
+                      instead will mark that other location empty -- are you sure?
+                      <button
+                        onClick={() => confirmDiscoveredPanel(true)}
+                        disabled={discoveredBusy}
+                        className="mt-2 block rounded-lg bg-status-pending px-3 py-1.5 font-semibold text-white disabled:opacity-40"
+                      >
+                        Yes, it's here instead
+                      </button>
+                    </div>
+                  )}
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => confirmDiscoveredPanel(false)}
+                      disabled={discoveredBusy}
+                      className="rounded-lg bg-accent-blue px-3 py-1.5 font-semibold text-white disabled:opacity-40"
+                    >
+                      {discoveredBusy ? 'Saving...' : 'Confirm this panel is here'}
+                    </button>
+                    <button
+                      onClick={() => {
+                        setShowDiscovered(false);
+                        setDiscoveredConflict(null);
+                        setDiscoveredError(null);
+                      }}
+                      className="rounded-lg border border-border px-3 py-1.5 text-slate-300"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
               <div className="flex gap-2">
                 <input
                   value={newSerial}
@@ -617,7 +836,7 @@ export default function Replacements() {
                 <button
                   onClick={confirmReplacement}
                   disabled={saving}
-                  className="rounded-lg bg-accent-blue px-4 py-2 text-sm font-semibold text-white disabled:opacity-40"
+                  className="rounded-lg btn-primary px-4 py-2 text-sm font-semibold text-white disabled:opacity-40"
                 >
                   Confirm {isVacantSlot ? 'installation' : 'replacement'}
                 </button>
@@ -690,7 +909,7 @@ export default function Replacements() {
             <button
               onClick={downloadPdf}
               disabled={pdfGenerating}
-              className="self-start rounded-lg bg-accent-blue px-4 py-2 text-sm font-semibold text-white disabled:opacity-40"
+              className="self-start rounded-lg btn-primary px-4 py-2 text-sm font-semibold text-white disabled:opacity-40"
             >
               {pdfGenerating ? pdfStatus || 'Generating...' : 'Download PDF'}
             </button>

@@ -17,21 +17,69 @@ const UTM_SOUTHERN = true;
 // string per row. A pica row's north-south line spans that full 56-panel width.
 const PANELS_PER_ROW = 56;
 
-// Real field measurements (user measured directly): panel width ~1.130m (matches the CONF
-// sheet's module_width_m almost exactly), gap between panels ~0.020m, and -- importantly --
-// the pica sits ~1.400m beyond the edge of the first/last panel, not right at it. Treating the
-// whole pica-to-pica span as 56 EQUAL slices (the original approach) quietly assumed panel 1
-// starts exactly at the pica, which overstates the true panel pitch and skews every position
-// toward the middle. Using the real pitch (panel + gap) and subtracting the fixed offset before
-// dividing gives a noticeably closer fit against real segment lengths (verified: a real 65.47m
-// segment's position-56 center lands at 64.65m by this formula, leaving a sensible ~0.8m for
-// the far end's own offset -- much tighter than assuming a uniform 56-way split).
-const PANEL_PITCH_M = 1.13 + 0.02;
-const PICA_OFFSET_M = 1.4;
+// Real field measurements (user measured directly, then cross-checked against the survey data)
+// show the row is NOT 56 evenly-spaced panels between the two picas -- the original uniform-
+// split model (kept below in a comment for history) was wrong in two ways:
+//   1. The row's two strings aren't contiguous -- there's a ~3.713m bay between them where the
+//      tracker's motor sits, not more panels.
+//   2. The picas sit INSIDE the panel run, not at its edges -- panels overhang past each pica.
+//      The offset is effectively NEGATIVE relative to the old model's assumption, not +1.4m:
+//      confirmed by measuring the module-1 outer edge to the pica (1.464m, exact) and the
+//      module-2 near edge to the pica (predicted 314mm from this model, measured 335mm -- 21mm
+//      off, well within tape/edge-identification tolerance) -- the pica sits UNDER module 2, not
+//      outside module 1.
+// Model (all confirmed by direct field measurement except MOTOR_BAY_M -- see the note below):
+//   panel 1.130m + gap 0.020m = pitch 1.150m
+//   one string's own span: 28 panels -> 28*1.130 + 27*0.020 = 32.180m
+//   motor bay between the row's two strings: 3.713m
+//   overhang: panels extend 1.464m beyond each pica
+// Verified: 2*32.180 + 3.713 - 2*1.464 = 65.145m, matching the real pica-to-pica span recorded
+// for all 3,182 rows in Datos_Backtracking_T1.xlsx to the millimetre.
+//
+// PENDING: MOTOR_BAY_M (3.713m) was solved algebraically from the total span and the other
+// (directly measured) constants -- not yet confirmed with a tape measurement of the actual gap
+// between the last panel of one string and the first panel of the other. If a future field
+// check finds a different bay width, only this one constant needs updating -- everything else
+// (module count, overhang, total span) was independently, directly measured.
+const PANEL_M = 1.13;
+const GAP_M = 0.02;
+const PANEL_PITCH_M = PANEL_M + GAP_M; // 1.150
+const STRING_MODULES = 28;
+const STRING_SPAN_M = STRING_MODULES * PANEL_M + (STRING_MODULES - 1) * GAP_M; // 32.180
+const MOTOR_BAY_M = 3.713; // PENDING confirmation -- see note above
+const OVERHANG_M = 1.464; // panels extend this far past each pica -- directly measured
+const STRING_PERIOD_M = STRING_SPAN_M + MOTOR_BAY_M; // 35.893 -- one string's span PLUS the bay that follows it
+// Guards the floor() boundary checks below against floating-point noise (e.g. 37.043 - 35.893
+// landing a few 1e-14 short of the true 1.150 due to IEEE754 rounding) -- physically meaningless
+// at 1mm, but without it a distance that should land EXACTLY on a module boundary can floor into
+// the wrong module by one. Confirmed necessary: a full round-trip check (every combined position
+// 1-56 -> distance -> position) failed on 8 of 56 positions without this, all off by exactly one.
+const EPSILON_M = 0.001;
 
-function positionFromDistance(distanceM: number): number {
-  const raw = Math.round((distanceM - PICA_OFFSET_M) / PANEL_PITCH_M) + 1;
-  return Math.max(1, Math.min(PANELS_PER_ROW, raw));
+/** Converts a distance from the north pica into a combined row position (1-56), accounting for
+ * the motor bay between the row's two strings and the panels' overhang past each pica. Distances
+ * are shifted by OVERHANG_M so 0 always means "the near edge of module 1" -- the pica itself
+ * sits OVERHANG_M past that edge, generally under module 2, not at module 1's edge. */
+function positionFromDistance(distanceFromNorthPicaM: number): number {
+  const dm = distanceFromNorthPicaM + OVERHANG_M + EPSILON_M;
+  const nearString = Math.min(Math.max(Math.floor(dm / STRING_PERIOD_M), 0), 1);
+  const withinString = dm - nearString * STRING_PERIOD_M;
+  const moduleInString = Math.max(1, Math.min(STRING_MODULES, Math.floor(withinString / PANEL_PITCH_M) + 1));
+  return nearString * STRING_MODULES + moduleInString;
+}
+
+/** Inverse of positionFromDistance: the distance from the north pica a given combined position
+ * (1-56) is expected to sit at. Deliberately shares the exact same constants and structure as
+ * the forward function above -- if the model above ever changes (e.g. once MOTOR_BAY_M is
+ * confirmed by a direct tape measurement), both update together and can never quietly drift out
+ * of sync with each other. Not called anywhere yet -- available for a future "where should
+ * module X physically be" feature, or for sanity-checking a match against the model. */
+function distanceFromPosition(position: number): number {
+  const clamped = Math.max(1, Math.min(PANELS_PER_ROW, Math.round(position)));
+  const nearString = clamped <= STRING_MODULES ? 0 : 1;
+  const moduleInString = clamped - nearString * STRING_MODULES; // 1-28
+  const dm = nearString * STRING_PERIOD_M + (moduleInString - 1) * PANEL_PITCH_M;
+  return dm - OVERHANG_M;
 }
 
 
@@ -45,9 +93,35 @@ function positionFromDistance(distanceM: number): number {
 // arrayBus's own string count, e.g. block 7 tracker 028's R4 row uses strings 5 and 6
 // (S-7.2.12.1.5 / .1.6), not 1/2. So this is relative (lower vs higher of whichever two numbers
 // actually exist for this row), never a comparison against a literal constant.
-function halfAndModule(position: number): { nearHalf: boolean; module: number } {
+//
+// Whether the far string's module numbers ASCEND (same direction as the near string) or DESCEND
+// (mirrored) depends on a real physical detail explained by the user after two rounds of
+// contradictory-seeming field tests: a "piercing connector" sits between adjacent trackers in a
+// row-chain, carrying the run to the next tracker. Module 1 of a string is always counted from
+// its own NEAREST piercing connector (or the DC box itself, for the very first string in a
+// chain). Concretely, for a given tracker within its row-chain:
+//   - If it's NOT the last tracker in the chain (more trackers follow): the piercing connector
+//     at ITS OWN far end (shared with the NEXT tracker) is the far string's nearest reference --
+//     so the far string's module numbers DESCEND with distance from the DC box (module 1 at the
+//     far/piercing end, module 28 next to the near string). Field-confirmed: block 5 tracker 42
+//     (pos 1 of 2, i.e. not the last) -- walking string .2 by hand from the DC box, the panel
+//     right next to string .1's module 28 carries the serial master data calls MODULE 28, and
+//     the far outer end (at the piercing connector, shared with the next tracker) carries what
+//     master data calls MODULE 1.
+//   - If it's isolated (alone in its row, no chain) OR the LAST tracker in a chain: there's no
+//     piercing connector at its own true far end to reference (an isolated tracker has none at
+//     all; the last tracker's far string instead runs an extension back to the SAME piercing
+//     connector at ITS OWN start, shared with the previous tracker) -- so the far string's
+//     module numbers ASCEND with distance from the DC box, same direction as the near string,
+//     same as if there were no chain at all. Field-confirmed: block 4 tracker 016 (pos 1 of 1,
+//     isolated) -- the tracker behind all 4 of the original real GPS field tests that
+//     established this whole locator.
+// geometry.trackers[key].pos / .pos_total (already extracted from the CAD block drawings, used
+// elsewhere for the schematic map) is exactly "which tracker in the chain, out of how many" --
+// pos === pos_total (including the pos_total===1 isolated case) means "don't reverse."
+function halfAndModule(position: number, farStringAscends: boolean): { nearHalf: boolean; module: number } {
   const nearHalf = position <= 28;
-  const module = nearHalf ? position : position - 28;
+  const module = nearHalf ? position : farStringAscends ? position - 28 : 57 - position;
   return { nearHalf, module };
 }
 
@@ -339,6 +413,11 @@ export async function findNearestPanel(query: LatLon): Promise<PanelMatch | NoNe
       const row = rows.length === 1 ? rows[0] : best.pica.isMotorRow ? rows[0] : rows[1];
       match.row = row;
 
+      // Isolated tracker (no chain partner) or the LAST tracker in a multi-tracker chain --
+      // both cases lack a piercing connector at this tracker's own true far end, so the far
+      // string ascends the same direction as the near string (see halfAndModule's note above).
+      const farStringAscends = trackerGeo.pos == null || trackerGeo.pos_total == null || trackerGeo.pos === trackerGeo.pos_total;
+
       // Find BOTH of this row's strings and sort by their actual string number -- never
       // assume it's literally "1" and "2" (see halfAndModule's note: block 7 tracker 028's R4
       // uses 5 and 6). Lower number = nearer the DC box, confirmed by 4 real field tests.
@@ -352,7 +431,7 @@ export async function findNearestPanel(query: LatLon): Promise<PanelMatch | NoNe
       rowStrings.sort((a, b) => a.parts.string - b.parts.string);
 
       function resolvePanel(position: number): { locationId: string; serialNumber?: string } | null {
-        const { nearHalf, module } = halfAndModule(position);
+        const { nearHalf, module } = halfAndModule(position, farStringAscends);
         const entry = nearHalf ? rowStrings[0] : rowStrings[1];
         if (!entry) return null;
         const p = entry.parts;
@@ -361,7 +440,7 @@ export async function findNearestPanel(query: LatLon): Promise<PanelMatch | NoNe
 
       const main = resolvePanel(combinedPosition);
       if (main) {
-        match.position = halfAndModule(combinedPosition).module;
+        match.position = halfAndModule(combinedPosition, farStringAscends).module;
         match.locationId = main.locationId;
         const panel = await db.panels.get(main.locationId);
         if (panel) match.serialNumber = panel.serialNumber;

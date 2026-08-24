@@ -209,10 +209,10 @@ export default function Reports() {
   return (
     <div>
       <div className="mb-4 flex items-center justify-between">
-        <h1 className="text-lg font-semibold text-slate-100">Reports</h1>
+        <h1 className="font-display text-xl font-bold tracking-tight text-slate-50">Reports</h1>
         <button
           onClick={() => setOpen(true)}
-          className="rounded-xl bg-accent-blue px-4 py-2 text-sm font-semibold text-white active:opacity-80"
+          className="rounded-xl btn-primary px-4 py-2 text-sm font-semibold text-white active:opacity-80"
         >
           + Report issue
         </button>
@@ -347,7 +347,7 @@ export default function Reports() {
                 <button
                   onClick={submit}
                   disabled={saving || !description}
-                  className="rounded-lg bg-accent-blue px-4 py-2 text-sm font-semibold text-white disabled:opacity-40"
+                  className="rounded-lg btn-primary px-4 py-2 text-sm font-semibold text-white disabled:opacity-40"
                 >
                   Save report
                 </button>
@@ -385,7 +385,7 @@ export default function Reports() {
                     <>
                       <button
                         onClick={() => markAsReplaced(i)}
-                        className="rounded-lg bg-accent-blue px-3 py-2 text-xs font-semibold text-white"
+                        className="rounded-lg btn-primary px-3 py-2 text-xs font-semibold text-white"
                       >
                         🔧 Mark as replaced
                       </button>
