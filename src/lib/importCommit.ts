@@ -5,6 +5,7 @@ import { newId } from './id';
 import { nowIso } from './time';
 import { orientationFromModule } from './locationCode';
 import { looksLikeRealSerial } from './panelDisplay';
+import { parseWattClass } from './watts';
 
 export interface ExistingPanelInfo {
   serialNumber: string;
@@ -98,6 +99,7 @@ export async function commitBatch(
         vocV: row.vocV ?? undefined,
         impA: row.impA ?? undefined,
         grade: row.grade ?? undefined,
+        wattClass: parseWattClass(row.grade),
         qcFlag: row.qcFlag ?? undefined,
       },
       sunManagerId: row.sunManagerId ?? undefined,

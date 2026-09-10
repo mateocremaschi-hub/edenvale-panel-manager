@@ -1,6 +1,7 @@
 import { getSupabase } from './supabase';
 import { db, setDataSource } from './db';
 import type { PhysicalLocation, Panel, PanelStatus } from './types';
+import { panelWatts } from './watts';
 
 const BATCH = 1000;
 
@@ -38,6 +39,10 @@ function toSupaPanel(p: Panel) {
     serial_number: p.serialNumber,
     serial_number_short: p.serialNumberShort ?? null,
     voltage: p.voltage ?? null,
+    // The one electrical datum the field team actually uses (535/540/545W). Older local records
+    // may only carry the raw grade string from the Excel -- panelWatts() parses that too, so
+    // whichever this device has gets carried to the server.
+    watt_class: panelWatts(p) ?? null,
     location_id: p.locationId,
     status: p.status,
     install_date: p.installDate ?? null,
@@ -56,6 +61,7 @@ function fromSupaPanel(r: any): Panel {
     status: r.status as PanelStatus,
     installDate: r.install_date ?? undefined,
     sunManagerId: r.sun_manager_id ?? undefined,
+    electrical: r.watt_class != null ? { wattClass: Number(r.watt_class) } : undefined,
   };
 }
 

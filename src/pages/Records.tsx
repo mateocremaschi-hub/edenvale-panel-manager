@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '@/lib/db';
+import { formatWatts, panelWatts } from '@/lib/watts';
 import { compareLocationIds } from '@/lib/locationCode';
 import { displaySerial } from '@/lib/panelDisplay';
 import type { PanelStatus } from '@/lib/types';
@@ -37,8 +38,8 @@ export default function Records() {
   }, [panels, tab, blockFilter, q]);
 
   function exportCsv() {
-    const header = 'locationId,serialNumber,status,voltage\n';
-    const rows = filtered.map((p) => `${p.locationId},${p.serialNumber},${p.status},${p.voltage ?? ''}`).join('\n');
+    const header = 'locationId,serialNumber,status,watts\n';
+    const rows = filtered.map((p) => `${p.locationId},${p.serialNumber},${p.status},${panelWatts(p) ?? ''}`).join('\n');
     const blob = new Blob([header + rows], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -94,7 +95,7 @@ export default function Records() {
               <th className="px-3 py-2">Location</th>
               <th className="px-3 py-2">Serial</th>
               <th className="px-3 py-2">Status</th>
-              <th className="px-3 py-2">Voltage</th>
+              <th className="px-3 py-2">Watts</th>
             </tr>
           </thead>
           <tbody>
@@ -103,7 +104,7 @@ export default function Records() {
                 <td className="px-3 py-2 font-mono text-xs">{p.locationId}</td>
                 <td className="px-3 py-2 font-mono text-xs">{displaySerial(p.serialNumber)}</td>
                 <td className="px-3 py-2">{p.status}</td>
-                <td className="px-3 py-2">{p.voltage?.toFixed(2) ?? '-'}</td>
+                <td className="px-3 py-2">{formatWatts(panelWatts(p))}</td>
               </tr>
             ))}
           </tbody>

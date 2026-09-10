@@ -2,6 +2,7 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '@/lib/db';
 import { t } from '@/i18n';
 import { useSettings } from '@/store/settings';
+import SyncNowCard from '@/components/SyncNowCard';
 
 function startOf(period: 'week' | 'month' | 'year'): Date {
   const d = new Date();
@@ -52,6 +53,7 @@ export default function Dashboard() {
       <p className="mb-5 mt-1 text-sm text-slate-400">
         {totalPanels ? `${totalPanels.toLocaleString()} panels under active management` : 'Loading panel data...'}
       </p>
+      <SyncNowCard />
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
         {cards.map((c) => (
           <div key={c.label} className="card-premium p-4">

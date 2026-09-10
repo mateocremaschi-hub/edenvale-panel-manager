@@ -5,7 +5,8 @@ import { db } from '@/lib/db';
 import { useSession } from '@/store/session';
 import { newId } from '@/lib/id';
 import { nowIso, formatDateTime } from '@/lib/time';
-import type { Issue, IssueType, Severity } from '@/lib/types';
+import { compressImage } from '@/lib/photo';
+import type { Issue, IssueType, Severity, Photo } from '@/lib/types';
 import BarcodeScanner from '@/components/BarcodeScanner';
 
 const ISSUE_TYPES: { value: IssueType; label: string }[] = [
@@ -65,8 +66,37 @@ export default function Reports() {
   const [sunManagerId, setSunManagerId] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Photos taken at report time -- the "before" evidence. Field reality: the broken panel often
+  // gets pulled and binned the same day it's reported, long before anyone comes back to record
+  // the replacement, so if the photo isn't taken NOW there will never be a "before" at all.
+  const [photos, setPhotos] = useState<{ file: File; previewUrl: string }[]>([]);
+  const [filter, setFilter] = useState('');
+  const issuePhotos = useLiveQuery(() => db.photos.where('relatedType').equals('issue').toArray(), [], []);
+  const photosByIssue = useMemo(() => {
+    const m = new Map<string, Photo[]>();
+    for (const ph of issuePhotos ?? []) {
+      const arr = m.get(ph.relatedId) ?? [];
+      arr.push(ph);
+      m.set(ph.relatedId, arr);
+    }
+    return m;
+  }, [issuePhotos]);
+
+  function addPhotos(files: FileList) {
+    const next = Array.from(files).map((file) => ({ file, previewUrl: URL.createObjectURL(file) }));
+    setPhotos((prev) => [...prev, ...next]);
+  }
+  function removePhoto(previewUrl: string) {
+    setPhotos((prev) => {
+      const target = prev.find((ph) => ph.previewUrl === previewUrl);
+      if (target) URL.revokeObjectURL(target.previewUrl);
+      return prev.filter((ph) => ph.previewUrl !== previewUrl);
+    });
+  }
 
   function resetForm() {
+    photos.forEach((ph) => URL.revokeObjectURL(ph.previewUrl));
+    setPhotos([]);
     setOpen(false);
     setCurrent(null);
     setSerialInput('');
@@ -128,6 +158,18 @@ export default function Reports() {
     setSaving(true);
     try {
       const issueId = newId('iss');
+      const photoRecords: Photo[] = await Promise.all(
+        photos.map(async (ph) => ({
+          photoId: newId('photo'),
+          relatedType: 'issue' as const,
+          relatedId: issueId,
+          blob: await compressImage(ph.file),
+          takenAt: nowIso(),
+          author: operatorId!,
+          photoRole: 'before' as const,
+          syncStatus: 'pending' as const,
+        }))
+      );
       const issue: Issue = {
         issueId,
         locationId: current.locationId,
@@ -142,11 +184,12 @@ export default function Reports() {
         requiresReplacement,
         monitorOnly,
         immediateSafetyConcern: immediateSafety,
-        photoIds: [],
+        photoIds: photoRecords.map((ph) => ph.photoId),
         syncStatus: 'pending',
       };
-      await db.transaction('rw', db.issues, db.panels, db.activityEvents, async () => {
+      await db.transaction('rw', db.issues, db.panels, db.activityEvents, db.photos, async () => {
         await db.issues.add(issue);
+        if (photoRecords.length) await db.photos.bulkAdd(photoRecords);
         await db.panels.update(current.panelId, {
           status: requiresReplacement ? 'pending_replacement' : 'issue_reported',
         });
@@ -204,6 +247,95 @@ export default function Reports() {
       });
     });
     setExpandedIssueId(null);
+  }
+
+  /** A report whose panel already shows "replaced" counts as replaced even if the report row
+   * itself hasn't caught up yet (the self-healing effect above fixes the row in the background). */
+  function effectiveStatus(i: Issue): Issue['status'] {
+    if (i.status !== 'replaced' && i.status !== 'closed' && panelByLocation.get(i.locationId)?.status === 'replaced') return 'replaced';
+    return i.status;
+  }
+
+  const filteredIssues = useMemo(() => {
+    const q = filter.trim().toLowerCase();
+    const all = issues ?? [];
+    if (!q) return all;
+    return all.filter((i) => {
+      const panel = panelByLocation.get(i.locationId);
+      const typeLabel = ISSUE_TYPES.find((it) => it.value === i.type)?.label ?? i.type;
+      const hay = [i.locationId, panel?.serialNumber ?? '', i.locationId.split('.')[0], typeLabel, i.type, i.description, i.severity, i.status, i.sunManagerId ?? '']
+        .join(' ')
+        .toLowerCase();
+      return hay.includes(q);
+    });
+  }, [issues, filter, panelByLocation]);
+
+  const SECTIONS: { key: string; title: string; accent: string; text: string; match: (st: Issue['status']) => boolean }[] = [
+    { key: 'open', title: 'Open / pending replacement', accent: 'border-status-pending', text: 'text-status-pending', match: (st) => st !== 'replaced' && st !== 'closed' },
+    { key: 'replaced', title: 'Replaced', accent: 'border-status-replaced', text: 'text-status-replaced', match: (st) => st === 'replaced' },
+    { key: 'closed', title: 'Closed without replacing', accent: 'border-status-normal', text: 'text-slate-400', match: (st) => st === 'closed' },
+  ];
+
+  function renderIssue(i: Issue) {
+    const expanded = expandedIssueId === i.issueId;
+    const panelNow = panelByLocation.get(i.locationId);
+    const alreadyReplacedInReality = panelNow?.status === 'replaced';
+    const st = effectiveStatus(i);
+    const isActionable = st !== 'replaced' && st !== 'closed';
+    const badge =
+      st === 'replaced'
+        ? 'bg-status-replaced/20 text-status-replaced'
+        : st === 'closed'
+          ? 'bg-status-normal/20 text-slate-300'
+          : 'bg-status-pending/20 text-status-pending';
+    const issuePhotoList = photosByIssue.get(i.issueId) ?? [];
+    return (
+      <div key={i.issueId} className="rounded-xl border border-border bg-bg-panel p-3">
+        <button onClick={() => setExpandedIssueId(expanded ? null : i.issueId)} className="flex w-full items-center justify-between gap-2 text-left">
+          <span className="text-sm font-medium text-slate-100">{i.locationId}</span>
+          <span className={`rounded-full px-2 py-0.5 text-[11px] font-bold uppercase ${badge}`}>{st.replace('_', ' ')}</span>
+          <span className="text-xs text-slate-400">{formatDateTime(i.reportedDate)}</span>
+        </button>
+        <div className="mt-1 text-xs text-slate-400">
+          {ISSUE_TYPES.find((it) => it.value === i.type)?.label} · {i.severity}
+          {panelNow && <span className="font-mono"> · {panelNow.serialNumber}</span>}
+          {issuePhotoList.length > 0 && <span> · 📷 {issuePhotoList.length}</span>}
+        </div>
+        {i.description && <div className="mt-1 text-sm text-slate-300">{i.description}</div>}
+        {expanded && (
+          <div className="mt-3 flex flex-col gap-3 border-t border-border pt-3">
+            {issuePhotoList.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                {issuePhotoList.map((ph) => (
+                  <img key={ph.photoId} src={URL.createObjectURL(ph.blob)} className="h-20 w-20 rounded-lg border border-border object-cover" alt="" />
+                ))}
+              </div>
+            )}
+            <div className="flex flex-wrap items-center gap-2">
+              {isActionable ? (
+                <>
+                  <button onClick={() => markAsReplaced(i)} className="rounded-lg btn-primary px-3 py-2 text-xs font-semibold text-white">
+                    🔧 Mark as replaced
+                  </button>
+                  <button onClick={() => closeIssue(i)} className="rounded-lg border border-border px-3 py-2 text-xs text-slate-300">
+                    Close without replacing
+                  </button>
+                </>
+              ) : (
+                <>
+                  {alreadyReplacedInReality && i.status !== 'replaced' && i.status !== 'closed' && (
+                    <span className="text-xs text-slate-500">The panel at this location already shows "replaced" -- marking this report to match.</span>
+                  )}
+                  <button onClick={() => reopenIssue(i)} className="rounded-lg border border-border px-3 py-2 text-xs text-slate-300">
+                    Reopen
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    );
   }
 
   return (
@@ -323,6 +455,38 @@ export default function Reports() {
                 placeholder="SunManager ID (optional, can be added later)"
                 className="rounded-lg border border-border bg-bg px-3 py-2 text-sm text-slate-100"
               />
+              <div className="rounded-lg border border-status-pending/50 bg-status-pending/5 p-2">
+                <div className="mb-1 text-xs font-bold uppercase tracking-wide text-status-pending">
+                  ◀ Before photos ({photos.length})
+                </div>
+                <p className="mb-2 text-[11px] text-slate-400">
+                  Take them now -- if this panel gets pulled today, there won't be another chance for a "before".
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {photos.map((ph) => (
+                    <div key={ph.previewUrl} className="relative h-16 w-16 overflow-hidden rounded-lg border border-border">
+                      <img src={ph.previewUrl} className="h-full w-full object-cover" alt="" />
+                      <button
+                        onClick={() => removePhoto(ph.previewUrl)}
+                        className="absolute right-0 top-0 rounded-bl bg-black/60 px-1.5 text-xs text-white"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                  <label className="flex h-16 w-16 cursor-pointer items-center justify-center rounded-lg border border-dashed border-border text-2xl text-slate-500">
+                    +
+                    <input
+                      type="file"
+                      accept="image/*"
+                      capture="environment"
+                      multiple
+                      className="hidden"
+                      onChange={(e) => e.target.files && addPhotos(e.target.files)}
+                    />
+                  </label>
+                </div>
+              </div>
               <label className="flex items-center gap-2 text-sm text-slate-300">
                 <input
                   type="checkbox"
@@ -360,63 +524,28 @@ export default function Reports() {
         </div>
       )}
 
-      <div className="flex flex-col gap-2">
-        {(issues ?? []).map((i) => {
-          const expanded = expandedIssueId === i.issueId;
-          const panelNow = panelByLocation.get(i.locationId);
-          const alreadyReplacedInReality = panelNow?.status === 'replaced';
-          const isActionable = i.status !== 'replaced' && i.status !== 'closed' && !alreadyReplacedInReality;
-          return (
-            <div key={i.issueId} className="rounded-xl border border-border bg-bg-panel p-3">
-              <button
-                onClick={() => setExpandedIssueId(expanded ? null : i.issueId)}
-                className="flex w-full items-center justify-between text-left"
-              >
-                <span className="text-sm font-medium text-slate-100">{i.locationId}</span>
-                <span className="text-xs text-slate-400">{formatDateTime(i.reportedDate)}</span>
-              </button>
-              <div className="mt-1 text-xs text-slate-400">
-                {ISSUE_TYPES.find((it) => it.value === i.type)?.label} · {i.severity} · {i.status}
-              </div>
-              {i.description && <div className="mt-1 text-sm text-slate-300">{i.description}</div>}
-              {expanded && (
-                <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-border pt-3">
-                  {isActionable ? (
-                    <>
-                      <button
-                        onClick={() => markAsReplaced(i)}
-                        className="rounded-lg btn-primary px-3 py-2 text-xs font-semibold text-white"
-                      >
-                        🔧 Mark as replaced
-                      </button>
-                      <button
-                        onClick={() => closeIssue(i)}
-                        className="rounded-lg border border-border px-3 py-2 text-xs text-slate-300"
-                      >
-                        Close without replacing
-                      </button>
-                    </>
-                  ) : (
-                    <>
-                      {alreadyReplacedInReality && i.status !== 'replaced' && i.status !== 'closed' && (
-                        <span className="text-xs text-slate-500">
-                          The panel at this location already shows "replaced" -- marking this report to match.
-                        </span>
-                      )}
-                      <button
-                        onClick={() => reopenIssue(i)}
-                        className="rounded-lg border border-border px-3 py-2 text-xs text-slate-300"
-                      >
-                        Reopen
-                      </button>
-                    </>
-                  )}
-                </div>
-              )}
+      <input
+        value={filter}
+        onChange={(e) => setFilter(e.target.value)}
+        placeholder="Filter by location, serial, block, type, description..."
+        className="mb-3 w-full rounded-lg border border-border bg-bg px-3 py-2 text-sm text-slate-100"
+      />
+
+      {SECTIONS.map((section) => {
+        const list = filteredIssues.filter((i) => section.match(effectiveStatus(i)));
+        return (
+          <div key={section.key} className="mb-5">
+            <div className={`mb-2 flex items-center gap-2 border-l-4 pl-2 ${section.accent}`}>
+              <span className={`text-xs font-bold uppercase tracking-wide ${section.text}`}>{section.title}</span>
+              <span className="text-xs text-slate-500">({list.length})</span>
             </div>
-          );
-        })}
-      </div>
+            {list.length === 0 && <div className="text-xs text-slate-600">None.</div>}
+            <div className="flex flex-col gap-2">
+              {list.map((i) => renderIssue(i))}
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }

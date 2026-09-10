@@ -3,12 +3,13 @@ import { useSearchParams } from 'react-router-dom';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '@/lib/db';
 import { useSession } from '@/store/session';
-import { useSettings } from '@/store/settings';
 import { newId } from '@/lib/id';
 import { nowIso, formatDateTime } from '@/lib/time';
 import { compressImage } from '@/lib/photo';
 import { generateReplacementsPdf } from '@/lib/pdfReport';
 import { correctPanelLocation, type LocationConflict } from '@/lib/historicalReplacements';
+import { WATT_CLASSES, formatWatts, panelWatts } from '@/lib/watts';
+import { pushPanelsById } from '@/lib/sync';
 import type { Replacement, Photo } from '@/lib/types';
 import BarcodeScanner from '@/components/BarcodeScanner';
 
@@ -20,7 +21,6 @@ interface PendingPhoto {
 
 export default function Replacements() {
   const { operatorId, operatorName } = useSession();
-  const { voltageMin, voltageMax } = useSettings();
   const replacements = useLiveQuery(() => db.replacements.orderBy('replacementDate').reverse().toArray(), [], []);
   const allPhotos = useLiveQuery(() => db.photos.where('relatedType').equals('replacement').toArray(), [], []);
   const operators = useLiveQuery(() => db.operators.toArray(), [], []);
@@ -39,7 +39,7 @@ export default function Replacements() {
   const [open, setOpen] = useState(false);
   const [locationId, setLocationId] = useState('');
   const [newSerial, setNewSerial] = useState('');
-  const [newVoltage, setNewVoltage] = useState('');
+  const [newPowerW, setNewPowerW] = useState<number | ''>('');
   const [reason, setReason] = useState('');
   const [replacedByName, setReplacedByName] = useState('');
   const [sunManagerId, setSunManagerId] = useState('');
@@ -53,7 +53,7 @@ export default function Replacements() {
   const [current, setCurrent] = useState<{
     locationId: string;
     serial: string;
-    voltage?: number;
+    watts?: number;
     panelId: string;
     issueId?: string;
   } | null>(null);
@@ -78,6 +78,69 @@ export default function Replacements() {
   const [blockFilter, setBlockFilter] = useState('');
   const [search, setSearch] = useState('');
   const [expandedPhotos, setExpandedPhotos] = useState<string | null>(null);
+  const [addingPhotosFor, setAddingPhotosFor] = useState<string | null>(null);
+  const [resyncBusy, setResyncBusy] = useState(false);
+
+  /** Attach photos to an ALREADY-SAVED replacement. Writes the photo rows (picked up by the
+   * normal outbox sync like any other pending photo) and appends their ids to the replacement's
+   * own photoIds so the record itself knows about them; re-marks the replacement pending so the
+   * updated photoIds reach the server too. */
+  async function addPhotosToReplacement(r: Replacement, role: 'before' | 'after', files: FileList) {
+    const key = `${r.replacementId}:${role}`;
+    setAddingPhotosFor(key);
+    try {
+      const records: Photo[] = await Promise.all(
+        Array.from(files).map(async (file) => ({
+          photoId: newId('photo'),
+          relatedType: 'replacement' as const,
+          relatedId: r.replacementId,
+          blob: await compressImage(file),
+          takenAt: nowIso(),
+          author: operatorId!,
+          photoRole: role,
+          syncStatus: 'pending' as const,
+        }))
+      );
+      await db.transaction('rw', db.photos, db.replacements, db.activityEvents, async () => {
+        await db.photos.bulkAdd(records);
+        await db.replacements.update(r.replacementId, {
+          photoIds: [...r.photoIds, ...records.map((p) => p.photoId)],
+          syncStatus: 'pending',
+        });
+        await db.activityEvents.add({
+          eventId: newId('evt'),
+          entityType: 'replacement',
+          entityId: r.replacementId,
+          action: 'photos_added_later',
+          newValue: `${records.length} ${role} photo(s)`,
+          operator: operatorId!,
+          timestamp: nowIso(),
+          syncStatus: 'pending',
+        });
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setAddingPhotosFor(null);
+    }
+  }
+
+  /** Forces a fresh push of THIS panel's current local data to the server -- for when a device
+   * knows it has the right data (a field correction, an install) but it never reached the
+   * server, so other devices stay stuck on the old value. Unlike Settings' "Push local data to
+   * Supabase", this only touches the one panel being viewed -- safe anytime. */
+  async function resyncCurrentPanel() {
+    if (!current) return;
+    setResyncBusy(true);
+    try {
+      await pushPanelsById([current.panelId]);
+      setSuccessMessage(`${current.locationId} re-sent to the server.`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setResyncBusy(false);
+    }
+  }
   const [serialInput, setSerialInput] = useState('');
   const [showLocationFallback, setShowLocationFallback] = useState(false);
 
@@ -89,7 +152,7 @@ export default function Replacements() {
     db.panels.get(panelId).then((panel) => {
       if (panel) {
         setLocationId(panel.locationId);
-        setCurrent({ locationId: panel.locationId, serial: panel.serialNumber, voltage: panel.voltage, panelId: panel.panelId, issueId });
+        setCurrent({ locationId: panel.locationId, serial: panel.serialNumber, watts: panelWatts(panel), panelId: panel.panelId, issueId });
         setOpen(true);
       } else {
         setError(`Panel "${panelId}" not found (it may have been removed from the last import).`);
@@ -154,7 +217,7 @@ export default function Replacements() {
       setError('No panel currently recorded at that location.');
       return;
     }
-    setCurrent({ locationId: loc.locationId, serial: panel.serialNumber, voltage: panel.voltage, panelId: panel.panelId });
+    setCurrent({ locationId: loc.locationId, serial: panel.serialNumber, watts: panelWatts(panel), panelId: panel.panelId });
   }
 
   const [notFoundSerial, setNotFoundSerial] = useState<string | null>(null);
@@ -178,7 +241,7 @@ export default function Replacements() {
       return;
     }
     setLocationId(panel.locationId);
-    setCurrent({ locationId: panel.locationId, serial: panel.serialNumber, voltage: panel.voltage, panelId: panel.panelId });
+    setCurrent({ locationId: panel.locationId, serial: panel.serialNumber, watts: panelWatts(panel), panelId: panel.panelId });
   }
 
   /** The scanned serial doesn't match anything on record -- most likely this panel was
@@ -205,7 +268,7 @@ export default function Replacements() {
     setCurrent({
       locationId: locId,
       serial: oldPanel?.serialNumber ?? 'unknown (no prior record)',
-      voltage: oldPanel?.voltage,
+      watts: panelWatts(oldPanel),
       panelId: locId,
     });
     setNewSerial(notFoundSerial ?? '');
@@ -342,12 +405,7 @@ export default function Replacements() {
       setError(`Serial ${serial} is already active at location ${clash.locationId}.`);
       return;
     }
-    const voltageNum = newVoltage ? Number(newVoltage) : undefined;
-    if (voltageNum !== undefined && (voltageNum < voltageMin || voltageNum > voltageMax)) {
-      setWarning(
-        `Voltage ${voltageNum}V is outside the configured range (${voltageMin}-${voltageMax}V). Saved anyway — double-check the reading.`
-      );
-    }
+    const wattsNum = newPowerW === '' ? undefined : Number(newPowerW);
 
     setSaving(true);
     try {
@@ -382,8 +440,7 @@ export default function Replacements() {
             removedSerial: current.serial,
             installedPanelId: current.panelId, // the physical location id stays stable across serials
             installedSerial: serial,
-            oldVoltage: current.voltage,
-            newVoltage: voltageNum,
+            newPowerW: wattsNum,
             replacementDate: nowIso(),
             replacedBy: operatorId!,
             replacedByName: replacedByName.trim(),
@@ -397,10 +454,11 @@ export default function Replacements() {
           await db.replacements.add(rec);
         }
         if (photoRecords.length) await db.photos.bulkAdd(photoRecords);
+        const existingPanel = await db.panels.get(current.panelId);
         await db.panels.update(current.panelId, {
           serialNumber: serial,
-          voltage: voltageNum,
           status: isVacantSlot ? 'normal' : 'replaced',
+          ...(wattsNum != null ? { electrical: { ...(existingPanel?.electrical ?? {}), wattClass: wattsNum } } : {}),
         });
         // Close every open report at this location, not just one -- if more than one was
         // ever logged here, a replacement resolves all of them, not just whichever happened
@@ -435,7 +493,7 @@ export default function Replacements() {
       setCurrent(null);
       setLocationId('');
       setNewSerial('');
-      setNewVoltage('');
+      setNewPowerW('');
       setReason('');
       setReplacedByName('');
       setSunManagerId('');
@@ -626,9 +684,18 @@ export default function Replacements() {
                   <div className="font-mono text-slate-100">{current.serial}</div>
                 )}
                 <div className="text-xs text-slate-500">
-                  {current.locationId} {!isVacantSlot && current.voltage ? `· ${current.voltage.toFixed(2)}V` : ''}
+                  {current.locationId} {!isVacantSlot && current.watts ? `· ${formatWatts(current.watts)}` : ''}
                 </div>
               </div>
+
+              <button
+                onClick={resyncCurrentPanel}
+                disabled={resyncBusy}
+                className="self-start text-xs text-accent-blue underline disabled:opacity-40"
+                title="Force-send this panel's current data to the server -- use this if another device isn't seeing a change you already made here"
+              >
+                {resyncBusy ? 'Sending...' : '🔄 Not showing up on other devices? Re-sync this panel'}
+              </button>
 
               {!isVacantSlot && !showFixLocation && (
                 <button onClick={() => setShowFixLocation(true)} className="self-start text-xs text-accent-blue underline">
@@ -768,14 +835,25 @@ export default function Replacements() {
                   📷
                 </button>
               </div>
-              <input
-                value={newVoltage}
-                onChange={(e) => setNewVoltage(e.target.value)}
-                placeholder="New voltage (V)"
-                type="number"
-                step="0.01"
-                className="rounded-lg border border-border bg-bg px-3 py-2 text-sm text-slate-100"
-              />
+              <div className="flex flex-col gap-1">
+                <span className="text-xs text-slate-400">New panel watt class{current.watts ? ` (removed one was ${formatWatts(current.watts)})` : ''}</span>
+                <div className="flex gap-2">
+                  {WATT_CLASSES.map((w) => (
+                    <button
+                      key={w}
+                      type="button"
+                      onClick={() => setNewPowerW(newPowerW === w ? '' : w)}
+                      className={`flex-1 rounded-lg border px-3 py-2 text-sm font-semibold ${
+                        newPowerW === w
+                          ? 'border-accent-blue bg-accent-blue/20 text-slate-50'
+                          : 'border-border bg-bg text-slate-300'
+                      }`}
+                    >
+                      {w}W
+                    </button>
+                  ))}
+                </div>
+              </div>
               <input
                 value={replacedByName}
                 onChange={(e) => setReplacedByName(e.target.value)}
@@ -891,7 +969,7 @@ export default function Replacements() {
         {pdfOpen && (
           <div className="mt-3 flex flex-col gap-2">
             <p className="text-xs text-slate-500">
-              Includes location, dates, serials, who replaced it, voltage, SunManager status, and any
+              Includes location, dates, serials, who replaced it, watt class, SunManager status, and any
               before/after photos attached.
             </p>
             {pdfError && <div className="rounded-lg bg-status-pending/20 p-2 text-xs text-status-pending">{pdfError}</div>}
@@ -1008,12 +1086,8 @@ export default function Replacements() {
                       <div>{r.replacedByName || operatorNameById.get(r.replacedBy) || r.replacedBy}</div>
                     </div>
                     <div>
-                      <span className="text-slate-500">Old voltage</span>
-                      <div>{r.oldVoltage !== undefined ? `${r.oldVoltage}V` : '-'}</div>
-                    </div>
-                    <div>
-                      <span className="text-slate-500">New voltage</span>
-                      <div>{r.newVoltage !== undefined ? `${r.newVoltage}V` : '-'}</div>
+                      <span className="text-slate-500">Installed panel</span>
+                      <div>{r.newPowerW !== undefined ? `${r.newPowerW}W` : r.newVoltage !== undefined ? `${r.newVoltage}V (legacy)` : '-'}</div>
                     </div>
                     <div>
                       <span className="text-slate-500">Removed serial</span>
@@ -1034,38 +1108,39 @@ export default function Replacements() {
                       <div className="text-slate-300">{r.notes}</div>
                     </div>
                   )}
-                  {photosForRow.length > 0 && (
-                    <div className="grid grid-cols-2 gap-3">
-                      <div>
-                        <div className="mb-1 font-semibold text-slate-400">Before</div>
-                        <div className="flex flex-wrap gap-2">
-                          {beforePhotos.length === 0 && <span className="text-slate-600">None</span>}
-                          {beforePhotos.map((p) => (
-                            <img
-                              key={p.photoId}
-                              src={URL.createObjectURL(p.blob)}
-                              className="h-16 w-16 rounded-lg border border-border object-cover"
-                              alt=""
-                            />
-                          ))}
+                  <div className="grid grid-cols-2 gap-3">
+                    {(['before', 'after'] as const).map((role) => {
+                      const list = role === 'before' ? beforePhotos : afterPhotos;
+                      return (
+                        <div key={role}>
+                          <div className="mb-1 font-semibold text-slate-400">{role === 'before' ? 'Before' : 'After'}</div>
+                          <div className="flex flex-wrap gap-2">
+                            {list.map((p) => (
+                              <img key={p.photoId} src={URL.createObjectURL(p.blob)} className="h-16 w-16 rounded-lg border border-border object-cover" alt="" />
+                            ))}
+                            {/* Photos can be added after the fact -- the field reality is that sometimes
+                                there's no chance to take them on the spot, and a replacement record with
+                                no evidence is worse than one with late evidence. */}
+                            <label
+                              className="flex h-16 w-16 cursor-pointer items-center justify-center rounded-lg border border-dashed border-border text-2xl text-slate-500"
+                              title={`Add ${role} photo(s) to this replacement`}
+                            >
+                              {addingPhotosFor === `${r.replacementId}:${role}` ? '…' : '+'}
+                              <input
+                                type="file"
+                                accept="image/*"
+                                capture="environment"
+                                multiple
+                                className="hidden"
+                                disabled={addingPhotosFor !== null}
+                                onChange={(e) => e.target.files && addPhotosToReplacement(r, role, e.target.files)}
+                              />
+                            </label>
+                          </div>
                         </div>
-                      </div>
-                      <div>
-                        <div className="mb-1 font-semibold text-slate-400">After</div>
-                        <div className="flex flex-wrap gap-2">
-                          {afterPhotos.length === 0 && <span className="text-slate-600">None</span>}
-                          {afterPhotos.map((p) => (
-                            <img
-                              key={p.photoId}
-                              src={URL.createObjectURL(p.blob)}
-                              className="h-16 w-16 rounded-lg border border-border object-cover"
-                              alt=""
-                            />
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-                  )}
+                      );
+                    })}
+                  </div>
                 </div>
               )}
             </div>

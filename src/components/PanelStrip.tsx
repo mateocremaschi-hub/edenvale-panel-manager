@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { Panel } from '@/lib/types';
+import { formatWatts, panelWatts } from '@/lib/watts';
 import { displaySerial } from '@/lib/panelDisplay';
 
 interface Props {
@@ -88,6 +89,7 @@ export default function PanelStrip({ title, panels, nearEndLabel = '1', farEndLa
           <div className="flex items-center justify-between">
             <span className="text-slate-400">Pos {active.locationId.split('.').pop()}</span>
             <span className="font-mono text-slate-200">{displaySerial(active.serialNumber)}</span>
+            {panelWatts(active) != null && <span className="text-accent-amber">{formatWatts(panelWatts(active))}</span>}
             <span className="text-slate-400">{active.status}</span>
             <button onClick={() => copy(active.serialNumber)} className="text-accent-blue">
               Copy

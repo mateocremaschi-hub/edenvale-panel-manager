@@ -123,8 +123,9 @@ export interface Replacement {
   removedSerial: string;
   installedPanelId: string;
   installedSerial: string;
-  oldVoltage?: number;
-  newVoltage?: number;
+  oldVoltage?: number; // legacy -- kept so older records still round-trip; no longer captured
+  newVoltage?: number; // legacy -- see above
+  newPowerW?: number; // nominal watt class of the installed panel (535 / 540 / 545)
   replacementDate: string; // ISO datetime
   replacedBy: string; // operatorId (session operator, kept for the audit trail)
   replacedByName: string; // who the operator said actually did the work, asked every time

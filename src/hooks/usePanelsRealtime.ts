@@ -12,6 +12,7 @@ interface SupaPanelRow {
   status: string;
   install_date: string | null;
   sun_manager_id: string | null;
+  watt_class?: number | null;
 }
 
 function fromRealtimeRow(r: SupaPanelRow): Panel {
@@ -24,6 +25,7 @@ function fromRealtimeRow(r: SupaPanelRow): Panel {
     status: r.status as PanelStatus,
     installDate: r.install_date ?? undefined,
     sunManagerId: r.sun_manager_id ?? undefined,
+    electrical: r.watt_class != null ? { wattClass: Number(r.watt_class) } : undefined,
   };
 }
 
