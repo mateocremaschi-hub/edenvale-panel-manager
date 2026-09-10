@@ -1,4 +1,6 @@
 import { useState } from 'react';
+import { loadWattsFromMasterExcel } from '@/lib/wattsFromExcel';
+import type { WattsEnrichmentStats } from '@/lib/wattsEnrichment';
 import { sha256Hex } from '@/lib/hash';
 import { requireAdminPin } from '@/lib/adminPin';
 import { pushAdminPinHash } from '@/lib/adminPinSync';
@@ -15,14 +17,40 @@ import { logImportEvent } from '@/lib/importCommit';
 
 export default function Settings() {
   const operators = useLiveQuery(() => db.operators.toArray(), [], []);
-  const { appName, setAppName, adminPin, setAdminPin, voltageMin, voltageMax, setVoltageRange } = useSettings();
+  const { appName, setAppName, adminPin, setAdminPin } = useSettings();
+  const [wattsBusy, setWattsBusy] = useState(false);
+  const [wattsProgress, setWattsProgress] = useState<string | null>(null);
+  const [wattsResult, setWattsResult] = useState<WattsEnrichmentStats | null>(null);
+  const [wattsError, setWattsError] = useState<string | null>(null);
+
+  async function onWattsFile(file: File) {
+    if (!(await requireAdminPin(adminPin, setAdminPin))) return;
+    setWattsBusy(true);
+    setWattsError(null);
+    setWattsResult(null);
+    try {
+      const stats = await loadWattsFromMasterExcel(file, (phase, done, total) => {
+        setWattsProgress(total > 0 ? `${phase}: ${done.toLocaleString()} / ${total.toLocaleString()}` : phase);
+      });
+      setWattsResult(stats);
+      if (operatorId) {
+        await logImportEvent(
+          operatorId,
+          `Watts loaded from ${file.name}: ${stats.panelsUpdated} panels updated, ${stats.panelsUnchanged} already correct, ${stats.panelsNotInExcel} not in Excel${stats.pushFailed ? ' -- PUSH FAILED (saved locally only)' : ''}`
+        );
+      }
+    } catch (err) {
+      setWattsError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setWattsBusy(false);
+      setWattsProgress(null);
+    }
+  }
   const { operatorId } = useSession();
 
   const [name, setName] = useState(appName);
   const [newOperator, setNewOperator] = useState('');
   const [pin, setPin] = useState('');
-  const [vMin, setVMin] = useState(String(voltageMin));
-  const [vMax, setVMax] = useState(String(voltageMax));
   const [pushProgress, setPushProgress] = useState<SyncProgress | null>(null);
   const [pushError, setPushError] = useState<string | null>(null);
   const [histBusy, setHistBusy] = useState(false);
@@ -291,32 +319,39 @@ export default function Settings() {
         </div>
       </section>
 
-      <section className="rounded-xl border border-border bg-bg-panel p-4">
-        <h2 className="mb-3 text-sm font-semibold text-slate-200">Voltage validation range</h2>
-        <div className="flex items-center gap-2">
-          <input
-            value={vMin}
-            onChange={(e) => setVMin(e.target.value)}
-            type="number"
-            className="w-24 rounded-lg border border-border bg-bg px-3 py-2 text-sm text-slate-100"
-          />
-          <span className="text-slate-500">to</span>
-          <input
-            value={vMax}
-            onChange={(e) => setVMax(e.target.value)}
-            type="number"
-            className="w-24 rounded-lg border border-border bg-bg px-3 py-2 text-sm text-slate-100"
-          />
-          <button
-            onClick={async () => {
-              if (!(await requireAdminPin(adminPin, setAdminPin))) return;
-              setVoltageRange(Number(vMin), Number(vMax));
-            }}
-            className="rounded-lg btn-primary px-4 py-2 text-sm font-semibold text-white"
-          >
-            Save
-          </button>
-        </div>
+      <section className="rounded-xl border border-accent-amber/40 bg-bg-panel p-4">
+        <h2 className="mb-1 text-sm font-semibold text-slate-200">Load panel Watts from master Excel</h2>
+        <p className="mb-3 text-xs text-slate-400">
+          One step: pick the master panels Excel and it fills in every panel's watt class (535 / 540 / 545) from the
+          "Pnom (W)" column (column K), matched by serial number. Never changes serials, statuses or locations, and
+          never asks to clear anything. Sends the result to the server so every device gets it.
+        </p>
+        <input
+          type="file"
+          accept=".xlsx,.xls"
+          disabled={wattsBusy}
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) onWattsFile(f);
+            e.target.value = '';
+          }}
+          className="text-sm text-slate-300"
+        />
+        {wattsProgress && <p className="mt-2 text-xs text-accent-amber">{wattsProgress}...</p>}
+        {wattsError && <p className="mt-2 text-xs text-status-pending">{wattsError}</p>}
+        {wattsResult && (
+          <div className="mt-3 text-xs text-slate-300">
+            <div className="text-status-replaced">✓ {wattsResult.panelsUpdated.toLocaleString()} panels updated</div>
+            <div>{wattsResult.panelsUnchanged.toLocaleString()} already had the right value · {wattsResult.panelsNotInExcel.toLocaleString()} not in the Excel</div>
+            {wattsResult.pushFailed ? (
+              <div className="mt-1 text-status-observation">
+                Saved on this device, but sending to the server stopped part-way ({wattsResult.pushed.toLocaleString()} sent). Run it again once online to finish.
+              </div>
+            ) : (
+              <div className="mt-1 text-slate-500">Other devices pick this up on their next sync (one-time full re-download each).</div>
+            )}
+          </div>
+        )}
       </section>
 
       <section className="rounded-xl border border-border bg-bg-panel p-4">

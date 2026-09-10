@@ -8,7 +8,6 @@ import { db, clearPanelData, setDataSource } from '@/lib/db';
 import { useSession } from '@/store/session';
 import { useSettings } from '@/store/settings';
 import { sha256Hex } from '@/lib/hash';
-import { applyWattsEnrichment, collectWattsFromRows, type WattsEnrichmentStats } from '@/lib/wattsEnrichment';
 
 type Step = 'pin' | 'select' | 'sheet' | 'header' | 'mapping' | 'confirmClear' | 'importing' | 'done';
 
@@ -73,12 +72,6 @@ export default function Import() {
   const [progress, setProgress] = useState({ processed: 0, total: 0 });
   const [commitStats, setCommitStats] = useState<CommitStats>(newCommitStats());
   const [summary, setSummary] = useState<ImportSummary | null>(null);
-  // "Watts only" mode: read the master Excel purely to fill each panel's nominal watt class,
-  // matched by serial -- never creates/replaces panels, never touches serials/statuses, never
-  // asks to clear anything. See lib/wattsEnrichment.ts for why this is separate from a re-import.
-  const [wattsOnly, setWattsOnly] = useState(false);
-  const [wattsStats, setWattsStats] = useState<WattsEnrichmentStats | null>(null);
-  const [wattsPhase, setWattsPhase] = useState('');
 
   useEffect(() => {
     return () => {
@@ -145,14 +138,6 @@ export default function Import() {
       return;
     }
     setError(null);
-    if (wattsOnly) {
-      if (!Object.values(mapping).includes('grade')) {
-        setError('Map the "Grade / watt class" column (Pnom (W)) to load Watts.');
-        return;
-      }
-      runWattsEnrichment();
-      return;
-    }
     const count = await db.panels.count();
     if (count > 0) {
       setExistingCount(count);
@@ -196,36 +181,6 @@ export default function Import() {
     }
   }
 
-  async function runWattsEnrichment() {
-    setStep('importing');
-    setProgress({ processed: 0, total: totalRows });
-    setWattsStats(null);
-    setWattsPhase('Reading Excel');
-    try {
-      const wattsBySerial = new Map<string, number>();
-      await sessionRef.current!.runImport(
-        headerRowIndex,
-        mapping,
-        (batch: ImportRow[]) => collectWattsFromRows(batch, wattsBySerial),
-        (processed, total) => setProgress({ processed, total })
-      );
-      const stats = await applyWattsEnrichment(wattsBySerial, (phase, done, total) => {
-        setWattsPhase(phase);
-        setProgress({ processed: done, total });
-      });
-      setWattsStats(stats);
-      if (operatorId) {
-        await logImportEvent(
-          operatorId,
-          `Watts enrichment from ${fileName}: ${stats.panelsUpdated} panels updated, ${stats.panelsUnchanged} already correct, ${stats.panelsNotInExcel} not in Excel${stats.pushFailed ? ' -- PUSH FAILED (saved locally only)' : ''}`
-        );
-      }
-      setStep('done');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    }
-  }
-
   const headerNames = (previewRows[headerRowIndex] ?? []).map((h) => String(h ?? '').trim()).filter(Boolean);
 
   return (
@@ -254,22 +209,6 @@ export default function Import() {
 
       {step === 'select' && (
         <div className="rounded-xl border border-border bg-bg-panel p-4">
-          <label className="mb-4 flex cursor-pointer items-start gap-3 rounded-lg border border-accent-amber/40 bg-accent-amber/5 p-3">
-            <input
-              type="checkbox"
-              checked={wattsOnly}
-              onChange={(e) => setWattsOnly(e.target.checked)}
-              className="mt-0.5 h-4 w-4"
-            />
-            <span className="text-sm">
-              <span className="font-semibold text-slate-100">Load panel Watts only</span>
-              <span className="block text-xs text-slate-400">
-                Reads the master Excel just to fill in each panel's watt class (535 / 540 / 545), matched by
-                serial number. Never creates, replaces or clears panels -- safe to run on top of everything
-                already recorded. Then sends the result to the server for every device.
-              </span>
-            </span>
-          </label>
           <p className="mb-3 text-sm text-slate-400">
             Select the panels Excel (.xlsx). Large files (tens of MB, hundreds of thousands of rows) are
             parsed in a background thread so the app stays responsive -- this can still take a little
@@ -401,9 +340,7 @@ export default function Import() {
       {step === 'importing' && (
         <div className="rounded-xl border border-border bg-bg-panel p-4">
           <p className="mb-2 text-sm text-slate-300">
-            {wattsOnly ? `${wattsPhase || 'Reading Excel'}: ` : 'Processing '}
-            {progress.processed.toLocaleString()} / {progress.total.toLocaleString()}
-            {wattsOnly ? '' : ' rows...'}
+            Processing {progress.processed.toLocaleString()} / {progress.total.toLocaleString()} rows...
           </p>
           <div className="h-2 w-full overflow-hidden rounded-full bg-bg">
             <div
@@ -411,47 +348,16 @@ export default function Import() {
               style={{ width: `${progress.total ? (progress.processed / progress.total) * 100 : 0}%` }}
             />
           </div>
-          {!wattsOnly && (
-            <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-slate-400 sm:grid-cols-4">
-              <div>Created: {commitStats.created}</div>
-              <div>Updated: {commitStats.updatedMasterData}</div>
-              <div>Serial mismatch: {commitStats.serialMismatch}</div>
-              <div>Skipped: {commitStats.skipped}</div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {step === 'done' && wattsOnly && wattsStats && (
-        <div className="flex flex-col gap-4">
-          <div className="rounded-xl border border-border bg-bg-panel p-4">
-            <h2 className="mb-2 text-sm font-semibold text-slate-200">Watts loaded</h2>
-            {wattsStats.pushFailed && (
-              <div className="mb-3 rounded-lg bg-status-observation/20 p-2 text-sm text-status-observation">
-                Saved on this device, but sending to the server failed part-way ({wattsStats.pushed.toLocaleString()} of{' '}
-                {wattsStats.panelsUpdated.toLocaleString()} sent). Re-run this once you're back online to finish.
-              </div>
-            )}
-            <div className="grid grid-cols-2 gap-2 text-sm text-slate-300 sm:grid-cols-3">
-              <div>Serials with Watts in Excel: {wattsStats.excelSerialsWithWatts.toLocaleString()}</div>
-              <div>Panels checked: {wattsStats.panelsChecked.toLocaleString()}</div>
-              <div className="text-status-replaced">Updated: {wattsStats.panelsUpdated.toLocaleString()}</div>
-              <div>Already correct: {wattsStats.panelsUnchanged.toLocaleString()}</div>
-              <div>Not in Excel: {wattsStats.panelsNotInExcel.toLocaleString()}</div>
-              <div>Sent to server: {wattsStats.pushed.toLocaleString()}</div>
-            </div>
-            <p className="mt-3 text-xs text-slate-500">
-              Other devices pick this up automatically on their next sync (it may trigger a one-time full
-              re-download on each, since so many panels changed at once).
-            </p>
+          <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-slate-400 sm:grid-cols-4">
+            <div>Created: {commitStats.created}</div>
+            <div>Updated: {commitStats.updatedMasterData}</div>
+            <div>Serial mismatch: {commitStats.serialMismatch}</div>
+            <div>Skipped: {commitStats.skipped}</div>
           </div>
-          <button onClick={() => navigate('/')} className="self-start rounded-lg btn-primary px-4 py-2 text-sm font-semibold text-white">
-            Go to Dashboard
-          </button>
         </div>
       )}
 
-      {step === 'done' && !wattsOnly && summary && (
+      {step === 'done' && summary && (
         <div className="flex flex-col gap-4">
           <div className="rounded-xl border border-border bg-bg-panel p-4">
             <h2 className="mb-2 text-sm font-semibold text-slate-200">Import finished</h2>
