@@ -58,6 +58,12 @@ export async function applyWattsEnrichment(
 
   const total = await db.panels.count();
   const changed: Panel[] = [];
+  // Every panel that has a watt value in the Excel, changed locally or not. "Already correct on
+  // THIS device" says nothing about the server -- the first real run of this tool found 377k
+  // panels already carrying watts locally (a normal Import had stored them, and Import never
+  // pushes), so pushing only the changed ones would have left the server -- and every other
+  // device -- without watts entirely.
+  const toPushIds: string[] = [];
   let scanned = 0;
   await db.panels.each((p) => {
     scanned++;
@@ -69,6 +75,7 @@ export async function applyWattsEnrichment(
       stats.panelsNotInExcel++;
       return;
     }
+    toPushIds.push(p.panelId);
     if (p.electrical?.wattClass === w) {
       stats.panelsUnchanged++;
       return;
@@ -87,7 +94,7 @@ export async function applyWattsEnrichment(
 
   // Push to the server so every other device gets it. pushPanelsById batches at 500 internally;
   // chunk the id list here too so progress stays visible on a ~378k-panel first run.
-  const ids = changed.map((p) => p.panelId);
+  const ids = toPushIds;
   try {
     for (let i = 0; i < ids.length; i += 2000) {
       onProgress?.('Sending to server', i, ids.length);

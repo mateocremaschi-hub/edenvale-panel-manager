@@ -348,7 +348,7 @@ export default function Settings() {
                 Saved on this device, but sending to the server stopped part-way ({wattsResult.pushed.toLocaleString()} sent). Run it again once online to finish.
               </div>
             ) : (
-              <div className="mt-1 text-slate-500">Other devices pick this up on their next sync (one-time full re-download each).</div>
+              <div className="mt-1 text-slate-500">{wattsResult.pushed.toLocaleString()} panels sent to the server. Other devices pick this up on their next sync (one-time full re-download each).</div>
             )}
           </div>
         )}
