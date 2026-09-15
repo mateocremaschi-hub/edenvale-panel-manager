@@ -4,12 +4,13 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '@/lib/db';
 import { useSession } from '@/store/session';
 import { newId } from '@/lib/id';
-import { nowIso, formatDateTime } from '@/lib/time';
+import { nowIso, formatDate, formatTime } from '@/lib/time';
 import { compressImage } from '@/lib/photo';
 import { generateReplacementsPdf } from '@/lib/pdfReport';
 import { correctPanelLocation, type LocationConflict } from '@/lib/historicalReplacements';
 import { WATT_CLASSES, formatWatts, panelWatts } from '@/lib/watts';
 import { pushPanelsById } from '@/lib/sync';
+import { loadBlockGeometry } from '@/lib/geometry';
 import type { Replacement, Photo } from '@/lib/types';
 import BarcodeScanner from '@/components/BarcodeScanner';
 
@@ -24,6 +25,47 @@ export default function Replacements() {
   const replacements = useLiveQuery(() => db.replacements.orderBy('replacementDate').reverse().toArray(), [], []);
   const allPhotos = useLiveQuery(() => db.photos.where('relatedType').equals('replacement').toArray(), [], []);
   const operators = useLiveQuery(() => db.operators.toArray(), [], []);
+
+  // Where each replacement physically happened (block / tracker / row / module), for the
+  // history list. Tracker + row come from the block's geometry (string code -> t/r), which is
+  // the same source the schematic map uses; falls back to whatever the location record carries.
+  const [placeById, setPlaceById] = useState<Map<string, { block: number; tracker?: string; row?: string; module: number }>>(new Map());
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const list = replacements ?? [];
+      if (list.length === 0) return;
+      const locIds = Array.from(new Set(list.map((r) => r.locationId)));
+      const locs = (await db.locations.bulkGet(locIds)).filter((l): l is NonNullable<typeof l> => !!l);
+      const blocks = Array.from(new Set(locs.map((l) => l.block)));
+      const stringToTR = new Map<string, { t?: string; r?: string }>();
+      await Promise.all(
+        blocks.map(async (b) => {
+          try {
+            const g = await loadBlockGeometry(b);
+            for (const gs of g.strings) stringToTR.set(gs.n, { t: gs.t, r: gs.r });
+          } catch {
+            /* block without geometry -- tracker just won't show */
+          }
+        })
+      );
+      const next = new Map<string, { block: number; tracker?: string; row?: string; module: number }>();
+      for (const l of locs) {
+        const tr = stringToTR.get(l.stringCode);
+        const trackerNum = tr?.t ?? l.tracker?.split('-').pop();
+        next.set(l.locationId, {
+          block: l.block,
+          tracker: trackerNum ? String(Number(trackerNum)) : undefined,
+          row: tr?.r ?? l.row,
+          module: l.positionInString,
+        });
+      }
+      if (!cancelled) setPlaceById(next);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [replacements]);
   const operatorNameById = useMemo(() => new Map((operators ?? []).map((o) => [o.operatorId, o.name])), [operators]);
 
   const photosByReplacement = useMemo(() => {
@@ -1046,60 +1088,114 @@ export default function Replacements() {
           const beforePhotos = photosForRow.filter((p) => p.photoRole === 'before');
           const afterPhotos = photosForRow.filter((p) => p.photoRole !== 'before');
           const expanded = expandedPhotos === r.replacementId;
+          const place = placeById.get(r.locationId);
           return (
-            <div key={r.replacementId} className="rounded-xl border border-border bg-bg-panel p-3 text-sm">
+            <div key={r.replacementId} className="card-premium rounded-xl p-3 text-sm">
               <button
                 onClick={() => setExpandedPhotos(expanded ? null : r.replacementId)}
-                className="flex w-full items-center justify-between text-left"
+                className="flex w-full items-start justify-between gap-3 text-left"
               >
-                <span className="font-medium text-slate-100">{r.locationId}</span>
-                <div className="flex items-center gap-3">
-                  <span className="text-xs text-slate-400">{formatDateTime(r.replacementDate)}</span>
-                  <label className="flex items-center gap-1 text-xs text-slate-400" onClick={(e) => e.stopPropagation()}>
-                    <input
-                      type="checkbox"
-                      checked={!!r.smUploaded}
-                      onChange={(e) => updateSm(r.replacementId, { smUploaded: e.target.checked })}
-                    />
-                    SM
-                  </label>
-                  <input
-                    value={r.sunManagerId ?? ''}
-                    onChange={(e) => updateSm(r.replacementId, { sunManagerId: e.target.value })}
-                    onClick={(e) => e.stopPropagation()}
-                    placeholder="ID SM"
-                    maxLength={4}
-                    className="w-14 rounded border border-border bg-bg px-1.5 py-0.5 text-center text-xs text-slate-100"
-                  />
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                    <span className="font-display text-base font-bold text-slate-50">
+                      Block {place?.block ?? r.locationId.split('.')[0]}
+                      {place?.tracker && <span className="text-accent-amber"> · Tracker {place.tracker}</span>}
+                    </span>
+                    {place?.row && <span className="text-xs font-semibold text-slate-300">{place.row}</span>}
+                    {place && <span className="text-xs text-slate-400">Module {place.module}</span>}
+                  </div>
+                  <div className="mt-0.5 font-mono text-[11px] text-slate-500">{r.locationId}</div>
+                </div>
+                <div className="shrink-0 text-right">
+                  <div className="text-sm font-semibold text-slate-100">{formatDate(r.replacementDate)}</div>
+                  <div className="text-[11px] text-slate-500">{formatTime(r.replacementDate)}</div>
                 </div>
               </button>
-              <div className="mt-1 font-mono text-xs text-slate-500">
-                {r.removedSerial} → {r.installedSerial}
+
+              <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[11px]">
+                {r.newPowerW !== undefined && (
+                  <span className="rounded-full bg-accent-amber/15 px-2 py-0.5 font-semibold text-accent-amber">{r.newPowerW}W</span>
+                )}
+                <span className="rounded-full bg-bg px-2 py-0.5 text-slate-300">
+                  {r.replacedByName || operatorNameById.get(r.replacedBy) || r.replacedBy}
+                </span>
+                {r.reason && <span className="rounded-full bg-bg px-2 py-0.5 text-slate-400">{r.reason}</span>}
+                {photosForRow.length > 0 && (
+                  <span className="rounded-full bg-bg px-2 py-0.5 text-slate-400">📷 {photosForRow.length}</span>
+                )}
+                <span
+                  className={`ml-auto rounded-full px-2 py-0.5 font-semibold ${
+                    r.smUploaded ? 'bg-status-replaced/15 text-status-replaced' : 'bg-status-observation/15 text-status-observation'
+                  }`}
+                >
+                  {r.smUploaded ? 'SunManager ✓' : 'SunManager pending'}
+                </span>
               </div>
-              {r.reason && <div className="mt-1 text-slate-300">{r.reason}</div>}
+
+              <div className="mt-2 flex items-center gap-2 font-mono text-xs">
+                <span className="text-slate-500">{r.removedSerial}</span>
+                <span className="text-slate-600">→</span>
+                <span className="text-slate-200">{r.installedSerial}</span>
+              </div>
 
               {expanded && (
                 <div className="mt-3 flex flex-col gap-3 border-t border-border pt-3 text-xs">
-                  <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-slate-300 sm:grid-cols-3">
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-slate-300 sm:grid-cols-3">
                     <div>
-                      <span className="text-slate-500">Replaced by</span>
+                      <div className="text-[10px] uppercase tracking-wide text-slate-500">Location</div>
+                      <div>
+                        Block {place?.block ?? '-'}
+                        {place?.tracker ? ` · Tracker ${place.tracker}` : ''}
+                        {place?.row ? ` · ${place.row}` : ''}
+                        {place ? ` · Module ${place.module}` : ''}
+                      </div>
+                      <div className="font-mono text-[11px] text-slate-500">{r.locationId}</div>
+                    </div>
+                    <div>
+                      <div className="text-[10px] uppercase tracking-wide text-slate-500">Date & time</div>
+                      <div>{formatDate(r.replacementDate)} · {formatTime(r.replacementDate)}</div>
+                    </div>
+                    <div>
+                      <div className="text-[10px] uppercase tracking-wide text-slate-500">Replaced by</div>
                       <div>{r.replacedByName || operatorNameById.get(r.replacedBy) || r.replacedBy}</div>
                     </div>
                     <div>
-                      <span className="text-slate-500">Installed panel</span>
-                      <div>{r.newPowerW !== undefined ? `${r.newPowerW}W` : r.newVoltage !== undefined ? `${r.newVoltage}V (legacy)` : '-'}</div>
-                    </div>
-                    <div>
-                      <span className="text-slate-500">Removed serial</span>
+                      <div className="text-[10px] uppercase tracking-wide text-slate-500">Removed serial</div>
                       <div className="font-mono">{r.removedSerial}</div>
                     </div>
                     <div>
-                      <span className="text-slate-500">Installed serial</span>
+                      <div className="text-[10px] uppercase tracking-wide text-slate-500">Installed serial</div>
                       <div className="font-mono">{r.installedSerial}</div>
                     </div>
                     <div>
-                      <span className="text-slate-500">SunManager</span>
-                      <div>{r.smUploaded ? 'Uploaded' : 'Not uploaded'}{r.sunManagerId ? ` (${r.sunManagerId})` : ''}</div>
+                      <div className="text-[10px] uppercase tracking-wide text-slate-500">Installed panel</div>
+                      <div>{r.newPowerW !== undefined ? `${r.newPowerW}W` : r.newVoltage !== undefined ? `${r.newVoltage}V (legacy)` : '-'}</div>
+                    </div>
+                    {r.reason && (
+                      <div>
+                        <div className="text-[10px] uppercase tracking-wide text-slate-500">Reason</div>
+                        <div>{r.reason}</div>
+                      </div>
+                    )}
+                    <div className="col-span-2 sm:col-span-3">
+                      <div className="text-[10px] uppercase tracking-wide text-slate-500">SunManager</div>
+                      <div className="mt-1 flex flex-wrap items-center gap-3">
+                        <label className="flex items-center gap-1.5">
+                          <input
+                            type="checkbox"
+                            checked={!!r.smUploaded}
+                            onChange={(e) => updateSm(r.replacementId, { smUploaded: e.target.checked })}
+                          />
+                          Uploaded to SunManager
+                        </label>
+                        <input
+                          value={r.sunManagerId ?? ''}
+                          onChange={(e) => updateSm(r.replacementId, { sunManagerId: e.target.value })}
+                          placeholder="SM ID"
+                          maxLength={4}
+                          className="w-16 rounded border border-border bg-bg px-1.5 py-0.5 text-center text-xs text-slate-100"
+                        />
+                      </div>
                     </div>
                   </div>
                   {r.notes && (
