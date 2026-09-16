@@ -1,4 +1,4 @@
-import { useRef, useState, type ReactNode, type PointerEvent as ReactPointerEvent, type WheelEvent as ReactWheelEvent } from 'react';
+import { useRef, useState, type ReactNode, type PointerEvent as ReactPointerEvent } from 'react';
 
 interface ZoomPanProps {
   children: ReactNode;
@@ -22,13 +22,9 @@ export default function ZoomPan({ children, aspectRatio }: ZoomPanProps) {
     return { x: Math.min(maxX, Math.max(-maxX, x)), y: Math.min(maxY, Math.max(-maxY, y)) };
   }
 
-  function onWheel(e: ReactWheelEvent<HTMLDivElement>) {
-    e.preventDefault();
-    const rect = containerRef.current!.getBoundingClientRect();
-    const next = Math.min(MAX_SCALE, Math.max(MIN_SCALE, scale * (1 - e.deltaY * 0.0015)));
-    setScale(next);
-    setPos((p) => clamp(next, p.x, p.y, rect));
-  }
+  // Deliberately NO wheel/trackpad zoom: with the cursor over the map, a normal page scroll
+  // used to zoom the map instead (and fast), so scrolling the page became a fight. Zoom is
+  // buttons (+ / − / Reset) and pinch on touch only; the wheel scrolls the page as usual.
 
   function onPointerDown(e: ReactPointerEvent<HTMLDivElement>) {
     pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
@@ -83,7 +79,6 @@ export default function ZoomPan({ children, aspectRatio }: ZoomPanProps) {
     <div className="relative">
       <div
         ref={containerRef}
-        onWheel={onWheel}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={endPointer}
