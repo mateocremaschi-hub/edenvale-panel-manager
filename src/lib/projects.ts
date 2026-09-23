@@ -60,7 +60,14 @@ export const PROJECTS: ProjectConfig[] = [
   // opened. blockCount 0 = unknown yet. Layout is a copy of Edenvale's ONLY as a starting
   // point -- it must be re-measured on site before the drone locator is trusted there.
   { id: 'wandoan-2', name: 'Wandoan 2', region: 'Queensland', blockCount: 0, geometryPath: '/geometry/wandoan-2', layout: EDENVALE_LAYOUT },
-  { id: 'wellington', name: 'Wellington', region: 'New South Wales', blockCount: 0, geometryPath: '/geometry/wellington', layout: EDENVALE_LAYOUT },
+  // Wellington: geometry for all 52 blocks extracted (Sept 2026) from the civil drawings
+  // (WEN-ISE-CV-DRW-0007 series) + the string list (WEN-ISE-EL-SCH-0006) -- 6,803 trackers,
+  // 26,792 strings, 40 DC boxes per block, every tracker cross-checked against both sources.
+  // Layout is still Edenvale's as a placeholder: ~4 trackers per block are SHORT (1 string per
+  // row, half-length bar; label code 'S'), which the drone locator's 2-strings-per-row model
+  // does not handle yet. modulesPerString=28 is the working assumption until the master
+  // panel Excel confirms it. Still needs its own Supabase project (supabaseUrl/anonKey).
+  { id: 'wellington', name: 'Wellington', region: 'New South Wales', blockCount: 52, geometryPath: '/geometry/wellington', layout: EDENVALE_LAYOUT },
   { id: 'walla-walla', name: 'Walla Walla', region: 'New South Wales', blockCount: 0, geometryPath: '/geometry/walla-walla', layout: EDENVALE_LAYOUT },
   { id: 'carwarp', name: 'Carwarp', region: 'Victoria', blockCount: 0, geometryPath: '/geometry/carwarp', layout: EDENVALE_LAYOUT },
 ];
