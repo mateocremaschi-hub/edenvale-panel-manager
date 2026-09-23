@@ -21,8 +21,13 @@ export default function AuthGate({ children }: { children: ReactNode }) {
   const [downloading, setDownloading] = useState<string | null>(null);
   const project = activeProjectConfig();
 
-  /** First sign-in on a fresh device: pull this farm's panels now (boot skipped it because
-   * nobody was signed in yet). */
+  /** Makes sure this device actually has the farm's data before granting access -- called both
+   * on a fresh sign-in and when an already-signed-in session is restored (e.g. reopening the
+   * app), so a device that got stuck or interrupted mid-download the first time gets another
+   * real attempt instead of silently entering the app with next to no local data. initData's
+   * own guard makes this a fast no-op once data actually exists locally. Throws on failure (a
+   * timed-out/retried-out request from lib/sync.ts) so the caller can show the error and let
+   * the person retry, rather than the screen sitting frozen with no way out. */
   async function ensureDataLoaded() {
     setDownloading('Preparing...');
     try {
@@ -43,14 +48,23 @@ export default function AuthGate({ children }: { children: ReactNode }) {
         const session = await currentSession();
         if (session?.user) {
           const profile = await loadProfile(session.user);
-          if (!cancelled) {
-            if (!profile.active) {
-              setError('Your account is disabled. Ask an admin.');
-              clearOperator();
-            } else {
-              setOperator(profile.userId, profile.displayName, profile.role);
-            }
+          if (cancelled) return;
+          if (!profile.active) {
+            setError('Your account is disabled. Ask an admin.');
+            clearOperator();
+            return;
           }
+          // Same safety net as a fresh sign-in -- a device that got interrupted mid-download
+          // last time (a hung request, the tab closed) gets another real attempt here instead
+          // of silently opening the app with barely any local data. Cheap no-op once the data
+          // is already there.
+          try {
+            await ensureDataLoaded();
+          } catch (err) {
+            if (!cancelled) setError(`Couldn't finish loading data: ${err instanceof Error ? err.message : String(err)}`);
+            return;
+          }
+          if (!cancelled) setOperator(profile.userId, profile.displayName, profile.role);
         } else if (!cancelled) {
           clearOperator();
         }

@@ -4,6 +4,35 @@ import type { PhysicalLocation, Panel, PanelStatus } from './types';
 import { panelWatts } from './watts';
 
 const BATCH = 1000;
+const BATCH_TIMEOUT_MS = 20000; // a single page taking longer than this on a flaky mobile
+// connection is a hang, not just slow -- fail it so the caller can retry, instead of the UI
+// sitting frozen forever with no error and no way out (found Sept 2026: a technician's phone
+// got stuck showing "Downloading locations... 0%" indefinitely, screen on, app foregrounded,
+// the whole time -- a single request had gone into the void with nothing to time it out).
+const BATCH_RETRIES = 3;
+
+/** Wraps one paginated query with a timeout and a few retries with backoff. Postgrest queries
+ * support .abortSignal(), which is what actually cancels the in-flight request on timeout
+ * (a bare Promise.race would leave the original request running in the background). */
+async function fetchPageWithRetry<T>(build: (signal: AbortSignal) => PromiseLike<{ data: T | null; error: { message: string } | null }>): Promise<T | null> {
+  let lastErr: unknown;
+  for (let attempt = 1; attempt <= BATCH_RETRIES; attempt++) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), BATCH_TIMEOUT_MS);
+    try {
+      const { data, error } = await build(controller.signal);
+      clearTimeout(timer);
+      if (error) throw new Error(error.message);
+      return data;
+    } catch (err) {
+      clearTimeout(timer);
+      lastErr = err;
+      if (attempt < BATCH_RETRIES) await new Promise((r) => setTimeout(r, 1500 * attempt));
+    }
+  }
+  throw lastErr instanceof Error ? lastErr : new Error('Request timed out after retries.');
+}
+
 
 function toSupaLocation(l: PhysicalLocation) {
   return {
@@ -152,8 +181,9 @@ export async function pullLocationsAndPanels(onProgress?: (p: SyncProgress) => v
     // requests, especially with writes happening concurrently (e.g. another device pushing at
     // the same time this pull is running) -- rows can silently fall through the gap between two
     // pages and never get pulled. location_id is the primary key, so this costs nothing extra.
-    const { data, error } = await supabase.from('locations').select('*').order('location_id', { ascending: true }).range(from, from + BATCH - 1);
-    if (error) throw new Error(`Pulling locations failed: ${error.message}`);
+    const data = await fetchPageWithRetry((signal) =>
+      supabase.from('locations').select('*').order('location_id', { ascending: true }).range(from, from + BATCH - 1).abortSignal(signal)
+    );
     if (!data || data.length === 0) break;
     await db.locations.bulkPut(data.map(fromSupaLocation));
     locTotal += data.length;
@@ -164,8 +194,9 @@ export async function pullLocationsAndPanels(onProgress?: (p: SyncProgress) => v
 
   let panelTotal = 0;
   for (let from = 0; ; from += BATCH) {
-    const { data, error } = await supabase.from('panels').select('*').order('panel_id', { ascending: true }).range(from, from + BATCH - 1);
-    if (error) throw new Error(`Pulling panels failed: ${error.message}`);
+    const data = await fetchPageWithRetry((signal) =>
+      supabase.from('panels').select('*').order('panel_id', { ascending: true }).range(from, from + BATCH - 1).abortSignal(signal)
+    );
     if (!data || data.length === 0) break;
     await db.panels.bulkPut(data.map(fromSupaPanel));
     panelTotal += data.length;
@@ -234,14 +265,16 @@ export async function pullPanelsUpdatedSince(onProgress?: (p: SyncProgress) => v
   let from = 0;
   let count = 0;
   for (;;) {
-    const { data, error } = await supabase
-      .from('panels')
-      .select('*')
-      .gt('updated_at', checkpoint)
-      .order('updated_at', { ascending: true })
-      .order('panel_id', { ascending: true })
-      .range(from, from + BATCH - 1);
-    if (error) throw new Error(`Downloading updated panels failed: ${error.message}`);
+    const data = await fetchPageWithRetry((signal) =>
+      supabase
+        .from('panels')
+        .select('*')
+        .gt('updated_at', checkpoint)
+        .order('updated_at', { ascending: true })
+        .order('panel_id', { ascending: true })
+        .range(from, from + BATCH - 1)
+        .abortSignal(signal)
+    );
     if (!data || data.length === 0) break;
     await db.panels.bulkPut(data.map(fromSupaPanel));
     count += data.length;

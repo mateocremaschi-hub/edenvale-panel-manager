@@ -229,6 +229,20 @@ export default function Settings() {
           {typeof __BUILD_TIME__ !== 'undefined' && __BUILD_TIME__
             ? new Date(__BUILD_TIME__).toLocaleString('en-AU', { dateStyle: 'medium', timeStyle: 'short' })
             : 'unknown (vite.config.ts wasn\'t updated in this deploy)'}
+          {typeof __BUILD_COMMIT__ !== 'undefined' && __BUILD_COMMIT__ && __BUILD_COMMIT__ !== 'local' && (
+            <>
+              {' · '}
+              <a
+                href={`https://github.com/mateocremaschi-hub/edenvale-panel-manager/commit/${__BUILD_COMMIT__}`}
+                target="_blank"
+                rel="noreferrer"
+                className="font-mono text-accent-blue underline"
+                title="Compare against the top of GitHub -- if this isn't the newest commit, an old src got re-uploaded"
+              >
+                {__BUILD_COMMIT__}
+              </a>
+            </>
+          )}
         </p>
       </div>
 
