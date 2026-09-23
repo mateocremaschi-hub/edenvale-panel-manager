@@ -1,3 +1,4 @@
+import { currentSession } from '@/lib/auth';
 import { hasChosenProject } from '@/store/project';
 import { db } from './db';
 import { hasSupabase } from './supabase';
@@ -15,6 +16,9 @@ export async function initializeData(onStatus?: (text: string) => void): Promise
   if (!hasChosenProject()) return;
   const existing = await db.panels.count();
   if (existing > 0) return;
+  // ...and nothing until someone is signed in: the tables are only readable by signed-in
+  // users. AuthGate calls this again right after a successful sign-in.
+  if (hasSupabase() && !(await currentSession())) return;
 
   if (hasSupabase()) {
     try {

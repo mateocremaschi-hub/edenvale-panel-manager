@@ -1,28 +1,49 @@
 import { activeProjectConfig } from '@/store/project';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { changeOwnPassword, listProfiles, signOut, updateProfile, type Profile, type Role } from '@/lib/auth';
 import { loadWattsFromMasterExcel } from '@/lib/wattsFromExcel';
 import type { WattsEnrichmentStats } from '@/lib/wattsEnrichment';
-import { sha256Hex } from '@/lib/hash';
 import { requireAdminPin } from '@/lib/adminPin';
-import { pushAdminPinHash } from '@/lib/adminPinSync';
-import { useLiveQuery } from 'dexie-react-hooks';
 import { Link } from 'react-router-dom';
 import { db, clearPanelData, setDataSource } from '@/lib/db';
 import { useSettings } from '@/store/settings';
 import { useSession } from '@/store/session';
-import { newId } from '@/lib/id';
 import { hasSupabase } from '@/lib/supabase';
 import { pushLocationsAndPanels, type SyncProgress } from '@/lib/sync';
 import { parseHistoricalReplacementsFile, applyHistoricalReplacements, removeHistoricalReplacementRecords, findSuspectSerials, type HistoricalApplyResult, type HistoricalCleanupResult, type SuspectSerial, type HistoricalRow } from '@/lib/historicalReplacements';
 import { logImportEvent } from '@/lib/importCommit';
 
 export default function Settings() {
-  const operators = useLiveQuery(() => db.operators.toArray(), [], []);
   const { appName, setAppName, adminPin, setAdminPin } = useSettings();
   const [wattsBusy, setWattsBusy] = useState(false);
   const [wattsProgress, setWattsProgress] = useState<string | null>(null);
   const [wattsResult, setWattsResult] = useState<WattsEnrichmentStats | null>(null);
   const [wattsError, setWattsError] = useState<string | null>(null);
+  const { operatorId, operatorName, role, clearOperator } = useSession();
+  const [users, setUsers] = useState<Profile[]>([]);
+  const [usersError, setUsersError] = useState<string | null>(null);
+
+  async function refreshUsers() {
+    setUsersError(null);
+    try {
+      setUsers(await listProfiles());
+    } catch (err) {
+      setUsersError(err instanceof Error ? err.message : String(err));
+    }
+  }
+  useEffect(() => {
+    if (role === 'admin') refreshUsers();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [role]);
+
+  async function setUserRole(userId: string, newRole: Role) {
+    try {
+      await updateProfile(userId, { role: newRole });
+      await refreshUsers();
+    } catch (err) {
+      setUsersError(err instanceof Error ? err.message : String(err));
+    }
+  }
 
   async function onWattsFile(file: File) {
     if (!(await requireAdminPin(adminPin, setAdminPin))) return;
@@ -47,11 +68,8 @@ export default function Settings() {
       setWattsProgress(null);
     }
   }
-  const { operatorId } = useSession();
 
   const [name, setName] = useState(appName);
-  const [newOperator, setNewOperator] = useState('');
-  const [pin, setPin] = useState('');
   const [pushProgress, setPushProgress] = useState<SyncProgress | null>(null);
   const [pushError, setPushError] = useState<string | null>(null);
   const [histBusy, setHistBusy] = useState(false);
@@ -191,18 +209,6 @@ export default function Settings() {
     }
   }
 
-  async function addOperator() {
-    const trimmed = newOperator.trim();
-    if (!trimmed) return;
-    await db.operators.add({ operatorId: newId('op'), name: trimmed, active: true });
-    setNewOperator('');
-  }
-
-  async function toggleOperator(id: string, active: boolean) {
-    if (!(await requireAdminPin(adminPin, setAdminPin))) return;
-    await db.operators.update(id, { active: !active });
-  }
-
   async function resetAllPanelData() {
     if (!(await requireAdminPin(adminPin, setAdminPin, 'Enter admin PIN to reset all panel data:'))) return;
     const confirmed = confirm(
@@ -258,34 +264,99 @@ export default function Settings() {
       </section>
 
       <section className="rounded-xl border border-border bg-bg-panel p-4">
-        <h2 className="mb-3 text-sm font-semibold text-slate-200">Operators</h2>
-        <div className="flex flex-col gap-2">
-          {(operators ?? []).map((op) => (
-            <div key={op.operatorId} className="flex items-center justify-between rounded-lg border border-border px-3 py-2">
-              <span className={op.active ? 'text-slate-100' : 'text-slate-500 line-through'}>{op.name}</span>
-              <button onClick={() => toggleOperator(op.operatorId, op.active)} className="text-xs text-accent-blue">
-                {op.active ? 'Deactivate' : 'Reactivate'}
-              </button>
-            </div>
-          ))}
-        </div>
-        <div className="mt-3 flex gap-2">
-          <input
-            value={newOperator}
-            onChange={(e) => setNewOperator(e.target.value)}
-            placeholder="Full name"
-            className="flex-1 rounded-lg border border-border bg-bg px-3 py-2 text-sm text-slate-100"
-          />
-          <button onClick={addOperator} className="rounded-lg bg-accent-teal px-4 py-2 text-sm font-semibold text-bg-panel">
-            Add
+        <h2 className="mb-1 text-sm font-semibold text-slate-200">Account</h2>
+        <p className="text-sm text-slate-300">
+          {operatorName} <span className="text-xs text-slate-500">· {role ?? 'no role'}</span>
+        </p>
+        <div className="mt-3 flex flex-wrap gap-2">
+          <button
+            onClick={async () => {
+              const pw = prompt('New password (at least 8 characters):');
+              if (!pw) return;
+              if (pw.length < 8) return alert('At least 8 characters.');
+              try {
+                await changeOwnPassword(pw);
+                alert('Password changed.');
+              } catch (err) {
+                alert(err instanceof Error ? err.message : String(err));
+              }
+            }}
+            className="rounded-lg border border-border px-4 py-2 text-sm text-slate-300"
+          >
+            Change my password
+          </button>
+          <button
+            onClick={async () => {
+              await signOut();
+              clearOperator();
+            }}
+            className="rounded-lg border border-status-pending/50 px-4 py-2 text-sm text-status-pending"
+          >
+            Sign out
           </button>
         </div>
       </section>
 
+      {role === 'admin' && (
+        <section className="rounded-xl border border-border bg-bg-panel p-4">
+          <h2 className="mb-1 text-sm font-semibold text-slate-200">Users</h2>
+          <p className="mb-3 text-xs text-slate-500">
+            Accounts are created in the Supabase dashboard (Authentication → Users → Add user) for this project's
+            backend. Set each person's role here: <b>technician</b> (this farm only), <b>coordinator</b> (any farm they
+            have an account in) or <b>admin</b> (users + data tools). A user shows up here after their first sign-in, or
+            once the database trigger creates their profile.
+          </p>
+          <div className="mb-2 flex gap-2">
+            <button onClick={refreshUsers} className="rounded-lg border border-border px-3 py-1.5 text-xs text-slate-300">
+              Refresh
+            </button>
+            {usersError && <span className="text-xs text-status-pending">{usersError}</span>}
+          </div>
+          <div className="flex flex-col gap-2">
+            {users.map((u) => (
+              <div key={u.userId} className="flex flex-wrap items-center gap-2 rounded-lg border border-border px-3 py-2">
+                <div className="min-w-0 flex-1">
+                  <div className={u.active ? 'text-sm text-slate-100' : 'text-sm text-slate-500 line-through'}>{u.displayName}</div>
+                  <div className="text-[11px] text-slate-500">{u.email ?? '-'}</div>
+                </div>
+                <select
+                  value={u.role}
+                  disabled={u.userId === operatorId}
+                  onChange={(e) => setUserRole(u.userId, e.target.value as Role)}
+                  className="rounded border border-border bg-bg px-2 py-1 text-xs text-slate-100 disabled:opacity-50"
+                  title={u.userId === operatorId ? "You can't change your own role" : ''}
+                >
+                  <option value="technician">technician</option>
+                  <option value="coordinator">coordinator</option>
+                  <option value="admin">admin</option>
+                </select>
+                <button
+                  onClick={() => {
+                    const name = prompt('Display name:', u.displayName);
+                    if (name && name.trim()) updateProfile(u.userId, { displayName: name.trim() }).then(refreshUsers).catch((e) => setUsersError(String(e)));
+                  }}
+                  className="text-xs text-accent-blue"
+                >
+                  Rename
+                </button>
+                <button
+                  onClick={() => updateProfile(u.userId, { active: !u.active }).then(refreshUsers).catch((e) => setUsersError(String(e)))}
+                  disabled={u.userId === operatorId}
+                  className="text-xs text-accent-blue disabled:opacity-40"
+                >
+                  {u.active ? 'Disable' : 'Enable'}
+                </button>
+              </div>
+            ))}
+            {users.length === 0 && <div className="text-xs text-slate-500">No users loaded yet.</div>}
+          </div>
+        </section>
+      )}
+
       <section className="rounded-xl border border-border bg-bg-panel p-4">
         <h2 className="mb-3 text-sm font-semibold text-slate-200">Data import</h2>
         <p className="mb-3 text-xs text-slate-500">
-          Import or re-import the panels Excel. Protected by the admin PIN above, if one is set.
+          Import or re-import the panels Excel. Admin only.
         </p>
         <Link
           to="/import"
@@ -295,37 +366,6 @@ export default function Settings() {
         </Link>
       </section>
 
-      <section className="rounded-xl border border-border bg-bg-panel p-4">
-        <h2 className="mb-3 text-sm font-semibold text-slate-200">Admin PIN</h2>
-        <p className="mb-2 text-xs text-slate-500">
-          Protects import, settings changes and voiding records. Leave blank to disable (Etapa 0 default).
-        </p>
-        <div className="flex gap-2">
-          <input
-            value={pin}
-            onChange={(e) => setPin(e.target.value)}
-            placeholder={adminPin ? '••••' : 'No PIN set'}
-            className="flex-1 rounded-lg border border-border bg-bg px-3 py-2 text-sm text-slate-100"
-          />
-          <button
-            onClick={async () => {
-              if (!(await requireAdminPin(adminPin, setAdminPin, 'Enter the CURRENT admin PIN to change it:'))) return;
-              const newHash = pin ? await sha256Hex(pin) : null;
-              setAdminPin(newHash);
-              try {
-                await pushAdminPinHash(newHash);
-              } catch (err) {
-                alert(
-                  `Saved on this device, but couldn't reach the shared server (${err instanceof Error ? err.message : String(err)}) -- other devices won't get this PIN until it syncs.`
-                );
-              }
-            }}
-            className="rounded-lg btn-primary px-4 py-2 text-sm font-semibold text-white"
-          >
-            Save
-          </button>
-        </div>
-      </section>
 
       <section className="rounded-xl border border-accent-amber/40 bg-bg-panel p-4">
         <h2 className="mb-1 text-sm font-semibold text-slate-200">Load panel Watts from master Excel</h2>

@@ -1,7 +1,7 @@
 import { HashRouter, Routes, Route } from 'react-router-dom';
 import NavBar from '@/components/NavBar';
 import StatusBar from '@/components/StatusBar';
-import OperatorGate from '@/components/OperatorGate';
+import AuthGate from '@/components/AuthGate';
 import ProjectGate from '@/components/ProjectGate';
 import Dashboard from '@/pages/Dashboard';
 import MapView from '@/pages/MapView';
@@ -21,14 +21,21 @@ import { useAutoSync } from '@/hooks/useAutoSync';
 import { usePanelsRealtime } from '@/hooks/usePanelsRealtime';
 import { useAppUpdate } from '@/hooks/useAppUpdate';
 
-export default function App() {
+/** Sync + Realtime only make sense once someone is signed in (the tables are only readable by
+ * signed-in users), so they mount inside the gates rather than at the app root. */
+function SyncHooks() {
   useAutoSync();
   usePanelsRealtime();
+  return null;
+}
+
+export default function App() {
   const { needRefresh, applyUpdate } = useAppUpdate();
   return (
     <HashRouter>
       <ProjectGate>
-      <OperatorGate>
+      <AuthGate>
+        <SyncHooks />
         <div className="flex min-h-screen flex-col md:flex-row">
           <NavBar />
           <div className="flex-1 pb-16 md:pb-0">
@@ -62,7 +69,7 @@ export default function App() {
             </main>
           </div>
         </div>
-      </OperatorGate>
+      </AuthGate>
       </ProjectGate>
     </HashRouter>
   );

@@ -158,7 +158,7 @@ export interface Operator {
   operatorId: string;
   name: string;
   active: boolean;
-  role?: string;
+  role?: string; // 'technician' | 'coordinator' | 'admin' -- mirrored from the profiles table
 }
 
 export interface Photo {
