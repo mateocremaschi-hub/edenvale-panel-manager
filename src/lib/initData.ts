@@ -1,3 +1,4 @@
+import { hasChosenProject } from '@/store/project';
 import { db } from './db';
 import { hasSupabase } from './supabase';
 import { pullLocationsAndPanels, type SyncProgress } from './sync';
@@ -10,6 +11,8 @@ import { seedFictionalDataIfEmpty } from './fictionalData';
  * back to the fictional Etapa 0 seed if that's not possible.
  */
 export async function initializeData(onStatus?: (text: string) => void): Promise<void> {
+  // Nothing to download until this device has picked a project -- the picker shows first.
+  if (!hasChosenProject()) return;
   const existing = await db.panels.count();
   if (existing > 0) return;
 

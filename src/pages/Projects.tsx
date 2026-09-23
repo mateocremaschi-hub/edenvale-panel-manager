@@ -13,11 +13,12 @@ export default function Projects() {
   const { activeProjectId, setActiveProjectId } = useProject();
 
   function choose(id: string) {
+    // Always record the choice (marks the device as "chosen" even when re-picking the same one).
+    setActiveProjectId(id);
     if (id === activeProjectId) {
       window.location.assign('/');
       return;
     }
-    setActiveProjectId(id);
     // The display name is a per-device setting; make it follow the project.
     useSettings.getState().setAppName(`${getProject(id).name} Panel Manager`);
     // Full reload: the local database, the backend client and the geometry paths are all
