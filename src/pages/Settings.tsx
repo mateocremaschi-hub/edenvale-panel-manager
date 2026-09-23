@@ -1,6 +1,6 @@
 import { activeProjectConfig } from '@/store/project';
 import { useEffect, useState } from 'react';
-import { changeOwnPassword, listProfiles, signOut, updateProfile, type Profile, type Role } from '@/lib/auth';
+import { listProfiles, signOut, updateProfile, type Profile, type Role } from '@/lib/auth';
 import { loadWattsFromMasterExcel } from '@/lib/wattsFromExcel';
 import type { WattsEnrichmentStats } from '@/lib/wattsEnrichment';
 import { requireAdminPin } from '@/lib/adminPin';
@@ -239,6 +239,7 @@ export default function Settings() {
         <Link to="/projects" className="text-xs font-semibold text-accent-blue underline">Switch project</Link>
       </section>
 
+      {role === 'admin' && (
       <section className="rounded-xl border border-border bg-bg-panel p-4">
         <h2 className="mb-3 text-sm font-semibold text-slate-200">App name</h2>
         <div className="flex gap-2">
@@ -262,29 +263,15 @@ export default function Settings() {
           needs a rebuild + redeploy to change.
         </p>
       </section>
+      )}
 
       <section className="rounded-xl border border-border bg-bg-panel p-4">
         <h2 className="mb-1 text-sm font-semibold text-slate-200">Account</h2>
         <p className="text-sm text-slate-300">
           {operatorName} <span className="text-xs text-slate-500">· {role ?? 'no role'}</span>
         </p>
+        <p className="mt-1 text-xs text-slate-500">To reset your password, ask an admin.</p>
         <div className="mt-3 flex flex-wrap gap-2">
-          <button
-            onClick={async () => {
-              const pw = prompt('New password (at least 8 characters):');
-              if (!pw) return;
-              if (pw.length < 8) return alert('At least 8 characters.');
-              try {
-                await changeOwnPassword(pw);
-                alert('Password changed.');
-              } catch (err) {
-                alert(err instanceof Error ? err.message : String(err));
-              }
-            }}
-            className="rounded-lg border border-border px-4 py-2 text-sm text-slate-300"
-          >
-            Change my password
-          </button>
           <button
             onClick={async () => {
               await signOut();
@@ -298,6 +285,7 @@ export default function Settings() {
       </section>
 
       {role === 'admin' && (
+      <>
         <section className="rounded-xl border border-border bg-bg-panel p-4">
           <h2 className="mb-1 text-sm font-semibold text-slate-200">Users</h2>
           <p className="mb-3 text-xs text-slate-500">
@@ -351,7 +339,6 @@ export default function Settings() {
             {users.length === 0 && <div className="text-xs text-slate-500">No users loaded yet.</div>}
           </div>
         </section>
-      )}
 
       <section className="rounded-xl border border-border bg-bg-panel p-4">
         <h2 className="mb-3 text-sm font-semibold text-slate-200">Data import</h2>
@@ -602,7 +589,7 @@ export default function Settings() {
         </div>
       </section>
 
-      <section className="rounded-xl border border-status-pending/40 bg-bg-panel p-4">
+        <section className="rounded-xl border border-status-pending/40 bg-bg-panel p-4">
         <h2 className="mb-3 text-sm font-semibold text-status-pending">Danger zone</h2>
         <p className="mb-3 text-xs text-slate-500">
           Wipes all panels/locations/issues/replacements/history on this device/URL only (nothing on any
@@ -613,6 +600,8 @@ export default function Settings() {
           Reset all panel data
         </button>
       </section>
+      </>
+      )}
 
       <footer className="pt-2 text-center text-xs text-slate-600">Developed by Mateo Cremaschi</footer>
     </div>

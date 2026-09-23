@@ -6,10 +6,8 @@ import { IMPORT_FIELDS, REQUIRED_IMPORT_FIELDS, type ColumnMapping, type ImportR
 import { commitBatch, loadExistingPanelIndex, logImportEvent, newCommitStats, type CommitStats } from '@/lib/importCommit';
 import { db, clearPanelData, setDataSource } from '@/lib/db';
 import { useSession } from '@/store/session';
-import { useSettings } from '@/store/settings';
-import { sha256Hex } from '@/lib/hash';
 
-type Step = 'pin' | 'select' | 'sheet' | 'header' | 'mapping' | 'confirmClear' | 'importing' | 'done';
+type Step = 'select' | 'sheet' | 'header' | 'mapping' | 'confirmClear' | 'importing' | 'done';
 
 const FIELD_LABELS: Record<string, string> = {
   locationCode: 'Location code (required)',
@@ -51,12 +49,9 @@ function downloadText(filename: string, content: string) {
 
 export default function Import() {
   const navigate = useNavigate();
-  const { operatorId } = useSession();
-  const adminPin = useSettings((s) => s.adminPin);
+  const { operatorId, role } = useSession();
 
-  const [step, setStep] = useState<Step>(adminPin ? 'pin' : 'select');
-  const [pinInput, setPinInput] = useState('');
-  const [pinError, setPinError] = useState<string | null>(null);
+  const [step, setStep] = useState<Step>('select');
 
   const sessionRef = useRef<ExcelImportSession | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -79,20 +74,19 @@ export default function Import() {
     };
   }, []);
 
-  async function checkPin() {
-    // Accept either the new hashed format or (for anyone who set a PIN before this device
-    // upgraded) the old plain-text format -- and quietly upgrade it to a hash on first use so
-    // nobody gets locked out by this change.
-    if ((await sha256Hex(pinInput)) === adminPin) {
-      setStep('select');
-      setPinError(null);
-    } else if (pinInput === adminPin) {
-      setStep('select');
-      setPinError(null);
-      useSettings.getState().setAdminPin(await sha256Hex(pinInput));
-    } else {
-      setPinError('Incorrect PIN.');
-    }
+  // Real gate: role comes from the signed-in session, not a locally-entered PIN, so it can't be
+  // bypassed by navigating straight to /import -- this used to be the case (the old PIN step
+  // only showed if a PIN happened to be set, and the actual import action had no check of its
+  // own at all).
+  if (role !== 'admin') {
+    return (
+      <div className="mx-auto max-w-lg">
+        <h1 className="mb-4 font-display text-xl font-bold tracking-tight text-slate-50">Import Excel</h1>
+        <div className="rounded-xl border border-border bg-bg-panel p-4 text-sm text-slate-300">
+          Admin only. Ask an admin to import data, or to make your account an admin.
+        </div>
+      </div>
+    );
   }
 
   async function onFileSelected(file: File) {
@@ -187,25 +181,6 @@ export default function Import() {
     <div className="pb-20">
       <h1 className="mb-4 font-display text-xl font-bold tracking-tight text-slate-50">Import Excel</h1>
       {error && <div className="mb-4 rounded-lg bg-status-pending/20 p-3 text-sm text-status-pending">{error}</div>}
-
-      {step === 'pin' && (
-        <div className="rounded-xl border border-border bg-bg-panel p-4">
-          <p className="mb-3 text-sm text-slate-300">This action is protected by the admin PIN.</p>
-          <div className="flex gap-2">
-            <input
-              type="password"
-              value={pinInput}
-              onChange={(e) => setPinInput(e.target.value)}
-              placeholder="PIN"
-              className="flex-1 rounded-lg border border-border bg-bg px-3 py-2 text-sm text-slate-100"
-            />
-            <button onClick={checkPin} className="rounded-lg btn-primary px-4 py-2 text-sm font-semibold text-white">
-              Unlock
-            </button>
-          </div>
-          {pinError && <p className="mt-2 text-sm text-status-pending">{pinError}</p>}
-        </div>
-      )}
 
       {step === 'select' && (
         <div className="rounded-xl border border-border bg-bg-panel p-4">

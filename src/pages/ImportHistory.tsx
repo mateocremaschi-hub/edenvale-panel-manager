@@ -1,5 +1,6 @@
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '@/lib/db';
+import { useSession } from '@/store/session';
 
 /**
  * A plain, chronological log of every bulk/admin action logged via logImportEvent -- the
@@ -9,6 +10,7 @@ import { db } from '@/lib/db';
  * mark had disappeared and nobody could say for certain whether Restore had been re-run.
  */
 export default function ImportHistory() {
+  const { role } = useSession();
   const events = useLiveQuery(
     () => db.activityEvents.where('entityId').equals('bulk-import').reverse().sortBy('timestamp'),
     [],
@@ -16,6 +18,17 @@ export default function ImportHistory() {
   );
   const operators = useLiveQuery(() => db.operators.toArray(), [], []);
   const nameFor = (id: string) => operators?.find((o) => o.operatorId === id)?.name ?? id;
+
+  if (role !== 'admin') {
+    return (
+      <div className="mx-auto max-w-lg">
+        <h1 className="mb-4 font-display text-xl font-bold tracking-tight text-slate-50">Import &amp; restore history</h1>
+        <div className="rounded-xl border border-border bg-bg-panel p-4 text-sm text-slate-300">
+          Admin only. Ask an admin to look this up, or to make your account an admin.
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div>

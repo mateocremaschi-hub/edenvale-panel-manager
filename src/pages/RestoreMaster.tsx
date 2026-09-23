@@ -33,7 +33,7 @@ function guessHeaderRowIndex(rows: unknown[][]): number {
  */
 export default function RestoreMaster() {
   const navigate = useNavigate();
-  const { operatorId } = useSession();
+  const { operatorId, role } = useSession();
   const { adminPin, setAdminPin } = useSettings();
   const sessionRef = useRef<ExcelImportSession | null>(null);
 
@@ -111,6 +111,17 @@ export default function RestoreMaster() {
       setError(err instanceof Error ? err.message : String(err));
       setStep('confirm');
     }
+  }
+
+  if (role !== 'admin') {
+    return (
+      <div className="mx-auto max-w-lg">
+        <h1 className="mb-4 font-display text-xl font-bold tracking-tight text-slate-50">Restore panel data</h1>
+        <div className="rounded-xl border border-border bg-bg-panel p-4 text-sm text-slate-300">
+          Admin only. Ask an admin to run this, or to make your account an admin.
+        </div>
+      </div>
+    );
   }
 
   return (
