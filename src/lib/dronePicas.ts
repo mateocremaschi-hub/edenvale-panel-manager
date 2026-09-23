@@ -1,3 +1,4 @@
+import { activeProjectConfig } from '@/store/project';
 import * as XLSX from 'xlsx';
 import { db } from './db';
 import type { TrackerPica } from './db';
@@ -15,7 +16,6 @@ const UTM_SOUTHERN = true;
 // sheet (n_modules_along_tracker: 56) and by the geometry data: every (tracker, row) pair has
 // exactly 2 strings (e.g. R2 has strings ...7.1.1 and ...7.1.2), each 28 modules, not one
 // string per row. A pica row's north-south line spans that full 56-panel width.
-const PANELS_PER_ROW = 56;
 
 // Real field measurements (user measured directly, then cross-checked against the survey data)
 // show the row is NOT 56 evenly-spaced panels between the two picas -- the original uniform-
@@ -41,14 +41,19 @@ const PANELS_PER_ROW = 56;
 // between the last panel of one string and the first panel of the other. If a future field
 // check finds a different bay width, only this one constant needs updating -- everything else
 // (module count, overhang, total span) was independently, directly measured.
-const PANEL_M = 1.13;
-const GAP_M = 0.02;
-const PANEL_PITCH_M = PANEL_M + GAP_M; // 1.150
-const STRING_MODULES = 28;
-const STRING_SPAN_M = STRING_MODULES * PANEL_M + (STRING_MODULES - 1) * GAP_M; // 32.180
-const MOTOR_BAY_M = 3.713; // PENDING confirmation -- see note above
-const OVERHANG_M = 1.464; // panels extend this far past each pica -- directly measured
-const STRING_PERIOD_M = STRING_SPAN_M + MOTOR_BAY_M; // 35.893 -- one string's span PLUS the bay that follows it
+// Values come from the active project's layout profile (lib/projects.ts) -- Edenvale's are the
+// field-measured ones documented above; a new farm gets its own, re-measured, never assumed.
+// Read once at module load: switching project reloads the page, so this can't go stale.
+const LAYOUT = activeProjectConfig().layout;
+const PANEL_M = LAYOUT.panelM;
+const GAP_M = LAYOUT.gapM;
+const PANEL_PITCH_M = PANEL_M + GAP_M;
+const STRING_MODULES = LAYOUT.modulesPerString;
+const STRING_SPAN_M = STRING_MODULES * PANEL_M + (STRING_MODULES - 1) * GAP_M;
+const MOTOR_BAY_M = LAYOUT.motorBayM;
+const OVERHANG_M = LAYOUT.overhangM;
+const STRING_PERIOD_M = STRING_SPAN_M + MOTOR_BAY_M;
+const PANELS_PER_ROW = 2 * STRING_MODULES; // 56 at Edenvale
 // Guards the floor() boundary checks below against floating-point noise (e.g. 37.043 - 35.893
 // landing a few 1e-14 short of the true 1.150 due to IEEE754 rounding) -- physically meaningless
 // at 1mm, but without it a distance that should land EXACTLY on a module boundary can floor into
@@ -120,8 +125,8 @@ function distanceFromPosition(position: number): number {
 // elsewhere for the schematic map) is exactly "which tracker in the chain, out of how many" --
 // pos === pos_total (including the pos_total===1 isolated case) means "don't reverse."
 function halfAndModule(position: number, farStringAscends: boolean): { nearHalf: boolean; module: number } {
-  const nearHalf = position <= 28;
-  const module = nearHalf ? position : farStringAscends ? position - 28 : 57 - position;
+  const nearHalf = position <= STRING_MODULES;
+  const module = nearHalf ? position : farStringAscends ? position - STRING_MODULES : 2 * STRING_MODULES + 1 - position;
   return { nearHalf, module };
 }
 

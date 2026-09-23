@@ -1,3 +1,4 @@
+import { activeProjectConfig } from '@/store/project';
 export interface GeometryTracker {
   rows: string[]; // e.g. ["R4","R5"]
   cx: number;
@@ -53,7 +54,7 @@ function pad2(n: number): string {
 /** Which blocks have real plan geometry available (from public/geometry/index.json). */
 export function loadGeometryIndex(): Promise<GeometryIndexEntry[]> {
   if (!indexCache) {
-    indexCache = fetch('/geometry/index.json').then((r) => {
+    indexCache = fetch(`${activeProjectConfig().geometryPath}/index.json`).then((r) => {
       if (!r.ok) throw new Error(`Geometry index not found (${r.status})`);
       return r.json();
     });
@@ -65,7 +66,7 @@ export function loadBlockGeometry(block: number): Promise<BlockGeometry> {
   if (!cache.has(block)) {
     cache.set(
       block,
-      fetch(`/geometry/${pad2(block)}.json`).then((r) => {
+      fetch(`${activeProjectConfig().geometryPath}/${pad2(block)}.json`).then((r) => {
         if (!r.ok) throw new Error(`Geometry for block ${block} not found (${r.status})`);
         return r.json();
       })
@@ -75,7 +76,7 @@ export function loadBlockGeometry(block: number): Promise<BlockGeometry> {
 }
 
 export function blockImageUrl(block: number): string {
-  return `/geometry/images/${pad2(block)}.png`;
+  return `${activeProjectConfig().geometryPath}/images/${pad2(block)}.png`;
 }
 
 function median(nums: number[]): number {

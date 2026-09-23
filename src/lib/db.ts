@@ -21,6 +21,21 @@ export interface TrackerPica {
   southLon: number;
 }
 
+/** One local database per project, so switching farms never mixes their panels and nobody
+ * has to download several farms onto one phone. Read straight from localStorage (not the
+ * zustand store) to avoid an import cycle at module load. Edenvale keeps the original name so
+ * every existing device keeps its already-downloaded data. */
+function localDbName(): string {
+  try {
+    const raw = localStorage.getItem('panelmanager.activeProject');
+    const id = raw ? (JSON.parse(raw)?.state?.activeProjectId as string | undefined) : undefined;
+    if (id && id !== 'edenvale') return `panel-manager-${id}`;
+  } catch {
+    /* fall through */
+  }
+  return 'edenvale-panel-manager';
+}
+
 export class PanelManagerDB extends Dexie {
   locations!: Table<PhysicalLocation, string>;
   panels!: Table<Panel, string>;
@@ -33,7 +48,7 @@ export class PanelManagerDB extends Dexie {
   trackerPicas!: Table<TrackerPica, string>;
 
   constructor() {
-    super('edenvale-panel-manager');
+    super(localDbName());
     // Indexed fields are chosen to match the required search/filter axes (Rendimiento
     // section of the spec): serial, location, SunManager ID, status, dates for sorting.
     this.version(1).stores({

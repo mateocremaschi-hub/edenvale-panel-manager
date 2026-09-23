@@ -15,6 +15,7 @@ import Import from '@/pages/Import';
 import RestoreMaster from '@/pages/RestoreMaster';
 import ImportHistory from '@/pages/ImportHistory';
 import DroneLocator from '@/pages/DroneLocator';
+import Projects from '@/pages/Projects';
 import BlockView from '@/pages/BlockView';
 import { useAutoSync } from '@/hooks/useAutoSync';
 import { usePanelsRealtime } from '@/hooks/usePanelsRealtime';
@@ -56,6 +57,7 @@ export default function App() {
                 <Route path="/restore-master" element={<RestoreMaster />} />
                 <Route path="/import-history" element={<ImportHistory />} />
                 <Route path="/locate" element={<DroneLocator />} />
+                <Route path="/projects" element={<Projects />} />
               </Routes>
             </main>
           </div>

@@ -3,6 +3,8 @@ import { db } from '@/lib/db';
 import { t } from '@/i18n';
 import { useSettings } from '@/store/settings';
 import SyncNowCard from '@/components/SyncNowCard';
+import { Link } from 'react-router-dom';
+import { activeProjectConfig } from '@/store/project';
 
 function startOf(period: 'week' | 'month' | 'year'): Date {
   const d = new Date();
@@ -21,6 +23,7 @@ function startOf(period: 'week' | 'month' | 'year'): Date {
 
 export default function Dashboard() {
   const appName = useSettings((s) => s.appName);
+  const project = activeProjectConfig();
 
   const totalPanels = useLiveQuery(() => db.panels.count(), [], 0);
   const openIssues = useLiveQuery(() => db.issues.where('status').equals('open').count(), [], 0);
@@ -48,7 +51,12 @@ export default function Dashboard() {
 
   return (
     <div>
-      <div className="mb-1 text-[11px] font-bold uppercase tracking-wider text-accent-amber">Live monitoring</div>
+      <div className="mb-1 flex items-center justify-between gap-3">
+        <span className="text-[11px] font-bold uppercase tracking-wider text-accent-amber">GRS · {project.name}{project.region ? ` · ${project.region}` : ''}</span>
+        <Link to="/projects" className="text-[11px] font-semibold text-slate-400 underline hover:text-slate-200">
+          Switch project
+        </Link>
+      </div>
       <h1 className="font-display text-2xl font-extrabold tracking-tight text-slate-50">{appName}</h1>
       <p className="mb-5 mt-1 text-sm text-slate-400">
         {totalPanels ? `${totalPanels.toLocaleString()} panels under active management` : 'Loading panel data...'}

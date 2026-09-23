@@ -1,3 +1,4 @@
+import { activeProjectConfig } from '@/store/project';
 import { useState } from 'react';
 import { loadWattsFromMasterExcel } from '@/lib/wattsFromExcel';
 import type { WattsEnrichmentStats } from '@/lib/wattsEnrichment';
@@ -224,6 +225,13 @@ export default function Settings() {
             : 'unknown (vite.config.ts wasn\'t updated in this deploy)'}
         </p>
       </div>
+
+      <section className="rounded-xl border border-border bg-bg-panel p-4">
+        <h2 className="mb-1 text-sm font-semibold text-slate-200">Project</h2>
+        <p className="text-sm text-slate-300">{activeProjectConfig().name}</p>
+        <p className="mb-2 text-xs text-slate-500">This device works on one project at a time; its data, maps and backend are separate from other farms.</p>
+        <Link to="/projects" className="text-xs font-semibold text-accent-blue underline">Switch project</Link>
+      </section>
 
       <section className="rounded-xl border border-border bg-bg-panel p-4">
         <h2 className="mb-3 text-sm font-semibold text-slate-200">App name</h2>
